@@ -124,7 +124,7 @@ pub mod grid {
             for elm in spec.get_gridshape() {
                 n *= elm;
             }
-            let gridvals: ndarray::Array1<f64> = ndarray::arr1(vec![value; n]);
+            let gridvals: ndarray::Array1<f64> = ndarray::arr1(&vec![value; n][..]);
             GridScalar{
                 spec: spec,
                 gridvals: ValVector(gridvals),
