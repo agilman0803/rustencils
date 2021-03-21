@@ -1,6 +1,6 @@
 [package]
 name = "rustencils"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["agilman0803 <agilman@princeton.edu>"]
 edition = "2018"
 description = "A work in progress trying to build modular and extenisble differential equation solver using stencils for finite difference methods."
