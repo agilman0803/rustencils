@@ -3,6 +3,26 @@ pub mod grid {
     extern crate ndarray;
 
     pub struct Grid(ndarray::ArrayD<Point>);
+
+    impl Grid {
+        pub(crate) fn indexed_iter(&self) -> ndarray::iter::IndexedIter<Point, ndarray::Dim<ndarray::IxDynImpl>> {
+            self.0.indexed_iter()
+        }
+    }
+
+    impl core::ops::Index<ndarray::Dim<ndarray::IxDynImpl>> for Grid {
+        type Output = Point;
+
+        fn index(self: &'_ Self, index: ndarray::Dim<ndarray::IxDynImpl>) -> &'_ Self::Output {
+            &self.0[index]
+        }
+    }
+
+    impl core::ops::IndexMut<ndarray::Dim<ndarray::IxDynImpl>> for Grid {
+        fn index_mut(self: &'_ mut Self, index: ndarray::Dim<ndarray::IxDynImpl>) -> &'_ mut Self::Output {
+            &mut self.0[index]
+        }
+    }
     
     pub trait GridSpec {
         fn get_coords(&self) -> &Vec<Vec<f64>>;
@@ -46,9 +66,9 @@ pub mod grid {
     }
 
     #[derive(Default)]
-    struct Point {
-        coord: Vec<f64>,
-        idx: usize,
+    pub struct Point {
+        pub coord: Vec<f64>,
+        pub idx: usize,
     }
 
     impl CartesianGridSpec {
@@ -82,15 +102,29 @@ pub mod grid {
         }
     }
 
-    pub struct ValVector(ndarray::Array1<f64>);
+    pub struct ValVector(pub (crate) ndarray::Array1<f64>);
 
     impl ValVector {
-        fn len(&self) -> usize {
+        pub fn len(&self) -> usize {
             self.0.len()
         }
 
         fn vals(&self) -> &ndarray::Array1<f64> {
             &self.0
+        }
+    }
+
+    impl core::ops::Index<usize> for ValVector {
+        type Output = f64;
+
+        fn index(self: &'_ Self, index: usize) -> &'_ Self::Output {
+            &self.0[index]
+        }
+    }
+
+    impl core::ops::IndexMut<usize> for ValVector {
+        fn index_mut(self: &'_ mut Self, index: usize) -> &'_ mut Self::Output {
+            &mut self.0[index]
         }
     }
     
@@ -209,7 +243,7 @@ pub mod stencil {
         stencil: Stencil,
         nderiv: usize,
         accuracy: usize,
-        weights: ndarray::Array1<f64>,
+        weights: crate::grid::ValVector, // ndarray::Array1<f64>,
     }
 
     // Called Operator1D in APC524 Main_PDE_Repo
@@ -217,7 +251,7 @@ pub mod stencil {
         pub fn new(slots: &[isize], nderiv: usize) -> Self {
             let stncl = Stencil::new(slots);
             FD_Weights {
-                weights: Self::gen_fd_weights(&stncl, nderiv),
+                weights: crate::grid::ValVector(Self::gen_fd_weights(&stncl, nderiv)),
                 accuracy: stncl.num_slots - nderiv,
                 nderiv: nderiv,
                 stencil: stncl,
@@ -245,6 +279,14 @@ pub mod stencil {
 
         pub fn get_slots(&self) -> &[isize] {
             &self.stencil.slot_pos[..]
+        }
+
+        pub fn get_ord(&self) -> usize {
+            self.nderiv
+        }
+
+        pub fn get_weights(&self) -> &crate::grid::ValVector {
+            &self.weights
         }
     }
 
@@ -278,16 +320,29 @@ pub mod operator {
         interior: super::stencil::FD_Weights,
         edge: T,
         basis_direction: usize,
+        deriv_ord: usize,
     }
 
     impl<T> Operator1D<T> where T: EdgeOperator {
         pub fn new(interior: super::stencil::FD_Weights, edge: T, direction: usize) -> Self {
+            let deriv_ord = interior.get_ord();
+            for elm in edge.get_left() {
+                assert_eq!(deriv_ord, elm.get_ord());
+            }
+            for elm in edge.get_right() {
+                assert_eq!(deriv_ord, elm.get_ord());
+            }
             edge.check_edges(&interior);
             Operator1D {
                 interior: interior,
                 edge: edge,
                 basis_direction: direction,
+                deriv_ord: deriv_ord,
             }
+        }
+
+        pub fn get_ord(&self) -> usize {
+            self.deriv_ord
         }
     }
 
@@ -295,6 +350,10 @@ pub mod operator {
         fn check_edges(&self, weights_int: &super::stencil::FD_Weights) -> Result<(), &'static str>;
         fn check_left_edge(&self, weights_int: &super::stencil::FD_Weights);
         fn check_right_edge(&self, weights_int: &super::stencil::FD_Weights);
+        fn get_left_mut(&mut self) -> &mut Vec<super::stencil::FD_Weights>;
+        fn get_right_mut(&mut self) -> &mut Vec<super::stencil::FD_Weights>;
+        fn get_left(&self) -> &Vec<super::stencil::FD_Weights>;
+        fn get_right(&self) -> &Vec<super::stencil::FD_Weights>;
     }
 
     // NOTE: "Fixed" refers to the fact that the bounds are NOT periodic! The
@@ -337,6 +396,11 @@ pub mod operator {
                 assert!(item.get_slots().iter().max().unwrap() <= &(n as isize), "Edge stencil out of range!");
             }
         }
+
+        fn get_left_mut(&mut self) -> &mut Vec<super::stencil::FD_Weights> { &mut self.left }
+        fn get_right_mut(&mut self) -> &mut Vec<super::stencil::FD_Weights> { &mut self.right }
+        fn get_left(&self) -> &Vec<super::stencil::FD_Weights> { &self.left }
+        fn get_right(&self) -> &Vec<super::stencil::FD_Weights> { &self.right }
     }
 
     impl FixedEdgeOperator {
@@ -356,15 +420,50 @@ pub mod operator {
         // populator: Option<MatrixPopulator>,
     }
 
+    impl OperatorMatrix {
+        pub fn of<T, U>(qty: &T) -> T
+        where T: GridQty<U>, U: GridSpec {}
+    }
+
     use crate::grid::{GridQty, GridSpec};
 
     pub fn construct_op<T, U, V>(op1d: Operator1D<T>, qty: &U) -> OperatorMatrix
-    where U: GridQty<V>, V: GridSpec
+    where U: GridQty<V>, V: GridSpec, T: EdgeOperator
     {
-        unimplemented!()
-    }
+        let dim_num = op1d.basis_direction;
+        let dim_pts = qty.get_spec().get_gridshape()[dim_num];
+        let tot_pts = qty.get_gridvals().len();
+        let shape = (tot_pts, tot_pts);
+        let deriv_ord = op1d.get_ord();
+        let denom = (qty.get_spec().get_spacing()[dim_num]).powi(deriv_ord as i32);
+        let mut matrix: ndarray::Array2<f64> = ndarray::Array2::zeros(shape);
+        for (idxs, pt) in qty.get_grid().indexed_iter() {
+            let left_idx = idxs[dim_num];
+            let right_idx = dim_pts - idxs[dim_num] - 1;
+            
+            let (stncl, weights) = match (left_idx, right_idx) {
+                (left_idx, right_idx) if left_idx >= op1d.edge.get_left().len() && right_idx >= op1d.edge.get_right().len()
+                            => (op1d.interior.get_slots(), op1d.interior.get_weights()),
+                (left_idx, _) if left_idx < op1d.edge.get_left().len()
+                            => (op1d.edge.get_left()[left_idx].get_slots(), op1d.edge.get_left()[left_idx].get_weights()),
+                (_, right_idx) if right_idx < op1d.edge.get_right().len()
+                            => (op1d.edge.get_right()[right_idx].get_slots(), op1d.edge.get_right()[right_idx].get_weights()),
+                (_, _) => panic!("Error while constructing operator!"),
+            };
 
-    pub struct MatrixPopulator {}
+            let _ = stncl.iter().enumerate().map(|(i, rel_pos)| {
+                let mut new_idxs = idxs.clone();
+                new_idxs[dim_num] = (new_idxs[dim_num] as isize + rel_pos) as usize;
+                let mtx_col_idx = qty.get_grid()[new_idxs].idx;
+                matrix[[pt.idx, mtx_col_idx]] = weights[i]/denom;
+            }).collect::<()>();
+        }
+        
+        OperatorMatrix {
+            shape,
+            matrix,
+        }
+    }
 }
 
 #[cfg(test)]
