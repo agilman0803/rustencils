@@ -8,6 +8,10 @@ pub mod grid {
         pub(crate) fn indexed_iter(&self) -> ndarray::iter::IndexedIter<Point, ndarray::Dim<ndarray::IxDynImpl>> {
             self.0.indexed_iter()
         }
+
+        pub(crate) fn iter(&self) -> ndarray::iter::Iter<'_, Point, ndarray::Dim<ndarray::IxDynImpl>> {
+            self.0.iter()
+        }
     }
 
     impl core::ops::Index<ndarray::Dim<ndarray::IxDynImpl>> for Grid {
@@ -30,6 +34,7 @@ pub mod grid {
         fn get_gridshape(&self) -> &Vec<usize>;
         fn get_spacing(&self) -> &Vec<f64>;
         fn get_grid(&self) -> &Grid;
+        // fn clone(&self) -> Self;
     }
 
     pub struct CartesianGridSpec {
@@ -102,7 +107,7 @@ pub mod grid {
         }
     }
 
-    pub struct ValVector(pub (crate) ndarray::Array1<f64>);
+    pub struct ValVector(pub(crate) ndarray::Array1<f64>);
 
     impl ValVector {
         pub fn len(&self) -> usize {
@@ -111,6 +116,10 @@ pub mod grid {
 
         fn vals(&self) -> &ndarray::Array1<f64> {
             &self.0
+        }
+
+        pub(crate) fn into_ndarray(&self) -> &ndarray::Array1<f64> {
+            self.vals()
         }
     }
 
@@ -129,31 +138,37 @@ pub mod grid {
     }
     
     pub trait GridQty<T> {
-        fn get_spec(&self) -> &T;
+        fn get_spec(&self) -> Rc<T>;
         fn get_gridvals(&self) -> &ValVector;
         fn get_grid(&self) -> &Grid;
+        fn new(spec: Rc<T>, gridvals: ValVector) -> Self;
     }
 
-    pub struct GridScalar<'a, T> {
-        spec: &'a T,
+    use std::rc::Rc;
+    
+    pub struct GridScalar<T> {
+        spec: Rc<T>,
         gridvals: ValVector, // A vector that just contains the values of interest at every point
     }
 
-    impl<'a, T> GridQty<T> for GridScalar<'a, T> where T: GridSpec {
-        fn get_spec(&self) -> &T { &self.spec }
+    impl<T> GridQty<T> for GridScalar<T> where T: GridSpec {
+        fn get_spec(&self) -> Rc<T> { Rc::clone(&self.spec) }
         fn get_gridvals(&self) -> &ValVector { &self.gridvals }
         fn get_grid(&self) -> &Grid { self.spec.get_grid() }
+        fn new(spec: Rc<T>, gridvals: ValVector) -> Self {
+            Self::new(spec, gridvals)
+        }
     }
 
-    impl<'a, T> GridScalar<'a, T> where T: GridSpec {
-        fn new(spec: &'a T, gridvals: ValVector) -> Self {
+    impl<T> GridScalar<T> where T: GridSpec {
+        fn new(spec: Rc<T>, gridvals: ValVector) -> Self {
             GridScalar {
                 spec: spec,
                 gridvals: gridvals,
             }
         }
 
-        pub fn uniform(spec: &'a T, value: f64) -> Self {
+        pub fn uniform(spec: Rc<T>, value: f64) -> Self {
             let mut n = 1;
             for elm in spec.get_gridshape() {
                 n *= elm;
@@ -165,21 +180,29 @@ pub mod grid {
             }
         }
 
-        pub fn ones(spec: &'a T) -> Self {
+        pub fn ones(spec: Rc<T>) -> Self {
             GridScalar::uniform(spec, 1.)
         }
 
-        pub fn zeros(spec: &'a T) -> Self {
+        pub fn zeros(spec: Rc<T>) -> Self {
             GridScalar::uniform(spec, 0.)
+        }
+
+        pub fn axis_vals(spec: Rc<T>, dimension: usize) -> Self {
+            let mut axis = GridScalar::zeros(Rc::clone(&spec));
+            let _ = spec.get_grid().iter().map(|point| {
+                axis.gridvals[point.idx] = point.coord[dimension];
+            }).collect::<()>();
+            axis
         }
     }
 
-    impl<T> std::ops::Add for GridScalar<'_, T> where T: GridSpec {
+    impl<T> std::ops::Add for GridScalar<T> where T: GridSpec {
         type Output = Self;
 
         fn add(self, other: GridScalar<T>) -> Self {
             if self.gridvals.len() != other.gridvals.len() { panic!("Can't add two grids of different sizes!") }
-            if self.get_grid() as *const _ != other.get_grid() as *const _ { panic!("Grid Specs must be the same!") }
+            if &*self.get_spec() as *const _ != &*other.get_spec() as *const _ { panic!("Grid Specs must be the same!") }
 
             let result = self.gridvals.vals() + other.gridvals.vals();
 
@@ -190,7 +213,7 @@ pub mod grid {
         }
     }
 
-    impl<T> std::ops::Add<f64> for GridScalar<'_, T> {
+    impl<T> std::ops::Add<f64> for GridScalar<T> {
         type Output = Self;
 
         fn add(self, other: f64) -> Self {
@@ -203,12 +226,12 @@ pub mod grid {
         }
     }
 
-    impl<T> std::ops::Mul for GridScalar<'_, T> where T: GridSpec {
+    impl<T> std::ops::Mul for GridScalar<T> where T: GridSpec {
         type Output = Self;
 
         fn mul(self, other: GridScalar<T>) -> Self {
             if self.gridvals.len() != other.gridvals.len() { panic!("Can't multiply two grids of different sizes!") }
-            if self.get_grid() as *const _ != other.get_grid() as *const _ { panic!("Grid specs must be the same!") }
+            if &*self.get_spec() as *const _ != &*other.get_spec() as *const _ { panic!("Grid specs must be the same!") }
 
             let result = self.gridvals.vals() * other.gridvals.vals();
             
@@ -219,7 +242,7 @@ pub mod grid {
         }
     }
 
-    impl<T> std::ops::Mul<f64> for GridScalar<'_, T> {
+    impl<T> std::ops::Mul<f64> for GridScalar<T> {
         type Output = Self;
 
         fn mul(self, other: f64) -> Self {
@@ -421,8 +444,12 @@ pub mod operator {
     }
 
     impl OperatorMatrix {
-        pub fn of<T, U>(qty: &T) -> T
-        where T: GridQty<U>, U: GridSpec {}
+        pub fn of<T, U>(&self, qty: T) -> T
+        where T: GridQty<U>, U: GridSpec {
+            assert_eq!(qty.get_gridvals().len(), self.shape.0);
+            let result = self.matrix.dot(qty.get_gridvals().into_ndarray());
+            GridQty::new(qty.get_spec(), crate::grid::ValVector(result))
+        }
     }
 
     use crate::grid::{GridQty, GridSpec};
