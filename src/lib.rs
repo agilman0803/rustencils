@@ -262,7 +262,7 @@ pub mod stencil {
     extern crate ndarray_linalg;
     extern crate factorial;
 
-    pub struct FD_Weights {
+    pub struct FdWeights {
         stencil: Stencil,
         nderiv: usize,
         accuracy: usize,
@@ -270,10 +270,10 @@ pub mod stencil {
     }
 
     // Called Operator1D in APC524 Main_PDE_Repo
-    impl FD_Weights {
+    impl FdWeights {
         pub fn new(slots: &[isize], nderiv: usize) -> Self {
             let stncl = Stencil::new(slots);
-            FD_Weights {
+            FdWeights {
                 weights: crate::grid::ValVector(Self::gen_fd_weights(&stncl, nderiv)),
                 accuracy: stncl.num_slots - nderiv,
                 nderiv: nderiv,
@@ -340,14 +340,14 @@ pub mod operator {
     // operator should be applied: [0][1][2] corresponding to
     // [x][y][z] of GridScalar.grididxs
     pub struct Operator1D<T> {
-        interior: super::stencil::FD_Weights,
+        interior: super::stencil::FdWeights,
         edge: T,
         basis_direction: usize,
         deriv_ord: usize,
     }
 
     impl<T> Operator1D<T> where T: EdgeOperator {
-        pub fn new(interior: super::stencil::FD_Weights, edge: T, direction: usize) -> Self {
+        pub fn new(interior: super::stencil::FdWeights, edge: T, direction: usize) -> Self {
             let deriv_ord = interior.get_ord();
             for elm in edge.get_left() {
                 assert_eq!(deriv_ord, elm.get_ord());
@@ -370,13 +370,13 @@ pub mod operator {
     }
 
     pub trait EdgeOperator {
-        fn check_edges(&self, weights_int: &super::stencil::FD_Weights) -> Result<(), &'static str>;
-        fn check_left_edge(&self, weights_int: &super::stencil::FD_Weights);
-        fn check_right_edge(&self, weights_int: &super::stencil::FD_Weights);
-        fn get_left_mut(&mut self) -> &mut Vec<super::stencil::FD_Weights>;
-        fn get_right_mut(&mut self) -> &mut Vec<super::stencil::FD_Weights>;
-        fn get_left(&self) -> &Vec<super::stencil::FD_Weights>;
-        fn get_right(&self) -> &Vec<super::stencil::FD_Weights>;
+        fn check_edges(&self, weights_int: &super::stencil::FdWeights) -> Result<(), &'static str>;
+        fn check_left_edge(&self, weights_int: &super::stencil::FdWeights);
+        fn check_right_edge(&self, weights_int: &super::stencil::FdWeights);
+        fn get_left_mut(&mut self) -> &mut Vec<super::stencil::FdWeights>;
+        fn get_right_mut(&mut self) -> &mut Vec<super::stencil::FdWeights>;
+        fn get_left(&self) -> &Vec<super::stencil::FdWeights>;
+        fn get_right(&self) -> &Vec<super::stencil::FdWeights>;
     }
 
     // NOTE: "Fixed" refers to the fact that the bounds are NOT periodic! The
@@ -387,12 +387,12 @@ pub mod operator {
     // edge operator construction given the structure of the interior operator.
     pub struct FixedEdgeOperator {
         edge_type: String,
-        left: Vec<super::stencil::FD_Weights>,
-        right: Vec<super::stencil::FD_Weights>,
+        left: Vec<super::stencil::FdWeights>,
+        right: Vec<super::stencil::FdWeights>,
     }
 
     impl EdgeOperator for FixedEdgeOperator {
-        fn check_edges(&self, weights_int: &super::stencil::FD_Weights) -> Result<(), &'static str> {
+        fn check_edges(&self, weights_int: &super::stencil::FdWeights) -> Result<(), &'static str> {
             match weights_int.get_slots().iter().min() {
                 Some(x) if x < &0 => self.check_left_edge(weights_int),
                 Some(_) => {},
@@ -406,29 +406,29 @@ pub mod operator {
             Ok(())
         }
 
-        fn check_left_edge(&self, weights_int: &super::stencil::FD_Weights) {
+        fn check_left_edge(&self, weights_int: &super::stencil::FdWeights) {
             assert_eq!(weights_int.get_slots().iter().min().unwrap(), &(self.left.len() as isize), "Improper number of left edge stencils!");
             for (n, item) in self.left.iter().enumerate() {
                 assert!(item.get_slots().iter().min().unwrap() >= &(0-(n as isize)), "Edge stencil out of range!");
             }
         }
 
-        fn check_right_edge(&self, weights_int: &super::stencil::FD_Weights) {
+        fn check_right_edge(&self, weights_int: &super::stencil::FdWeights) {
             assert_eq!(weights_int.get_slots().iter().max().unwrap(), &(self.right.len() as isize), "Improper number of right edge stencils!");
             for (n, item) in self.right.iter().enumerate() {
                 assert!(item.get_slots().iter().max().unwrap() <= &(n as isize), "Edge stencil out of range!");
             }
         }
 
-        fn get_left_mut(&mut self) -> &mut Vec<super::stencil::FD_Weights> { &mut self.left }
-        fn get_right_mut(&mut self) -> &mut Vec<super::stencil::FD_Weights> { &mut self.right }
-        fn get_left(&self) -> &Vec<super::stencil::FD_Weights> { &self.left }
-        fn get_right(&self) -> &Vec<super::stencil::FD_Weights> { &self.right }
+        fn get_left_mut(&mut self) -> &mut Vec<super::stencil::FdWeights> { &mut self.left }
+        fn get_right_mut(&mut self) -> &mut Vec<super::stencil::FdWeights> { &mut self.right }
+        fn get_left(&self) -> &Vec<super::stencil::FdWeights> { &self.left }
+        fn get_right(&self) -> &Vec<super::stencil::FdWeights> { &self.right }
     }
 
     impl FixedEdgeOperator {
-        pub fn new(left_edge_ops: Vec<super::stencil::FD_Weights>,
-                   right_edge_ops: Vec<super::stencil::FD_Weights>) -> Self {
+        pub fn new(left_edge_ops: Vec<super::stencil::FdWeights>,
+                   right_edge_ops: Vec<super::stencil::FdWeights>) -> Self {
             FixedEdgeOperator {
                 edge_type: String::from("fixed"),
                 left: left_edge_ops,
