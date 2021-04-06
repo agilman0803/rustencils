@@ -3,6 +3,7 @@ name = "rustencils"
 version = "0.1.3"
 authors = ["agilman0803 <agilman@princeton.edu>"]
 edition = "2018"
+repository = "https://github.com/agilman0803/rustencils"
 description = "A work in progress trying to build modular and extenisble differential equation solver using stencils for finite difference methods."
 license = "MIT OR GPL-3.0+"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
