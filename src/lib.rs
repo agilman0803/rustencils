@@ -130,9 +130,9 @@ pub mod grid {
     impl AxisSetup {
         /// Returns an AxisSetup
         /// # Arguments
-        /// * `start` - the minimum axis value (f64)
-        /// * `delta` - the spacing btween axis points (f64)
-        /// * `steps` - the number of axis points including start (usize)
+        /// * `start` - the minimum axis value
+        /// * `delta` - the spacing btween axis points
+        /// * `steps` - the number of axis points including start
         /// # Examples
         /// ```should_panic
         /// use rustencils::grid::AxisSetup;
@@ -176,7 +176,7 @@ pub mod grid {
 
         /// Returns a CartesianGridSpec built from a vector of AxisSetup structs.
         /// # Arguments
-        /// * `axes` - vector containing one or more instances of AxisSetup (Vec<AxisSetup>)
+        /// * `axes` - vector containing one or more instances of AxisSetup
         /// # Examples
         /// ```
         /// use rustencils::grid::{AxisSetup, GridSpec, CartesianGridSpec};
@@ -297,7 +297,7 @@ pub mod grid {
         /// some operation on an existing GridQty.
         /// (See rustencils::operator::OperatorMatrix::of)
         /// # Arguments
-        /// * `spec` - reference counted smart pointer to a GridSpec (Rc<S>)
+        /// * `spec` - reference counted smart pointer to a GridSpec
         /// * `gridvals` - ValVector containing the quantity of interest
         fn new(spec: Rc<S>, gridvals: ValVector) -> Self;
     }
@@ -336,8 +336,8 @@ pub mod grid {
         /// Returns a GridScalar where the value of interest at each point is
         /// equal to the value passed in as an argument
         /// # Arguments
-        /// * `spec` - reference counted smart pointer to a GridSpec (Rc<S>)
-        /// * `value` - the value that will be set at each grid point (f64)
+        /// * `spec` - reference counted smart pointer to a GridSpec
+        /// * `value` - the value that will be set at each grid point
         /// # Examples
         /// ```
         /// use std::rc::Rc;
@@ -365,7 +365,7 @@ pub mod grid {
         /// Returns a GridScalar where the value of interest at each point is
         /// equal to one.
         /// # Arguments
-        /// * `spec` - reference counted smart pointer to a GridSpec (Rc<S>)
+        /// * `spec` - reference counted smart pointer to a GridSpec
         /// # Examples
         /// ```
         /// use std::rc::Rc;
@@ -385,7 +385,7 @@ pub mod grid {
         /// Returns a GridScalar where the value of interest at each point is
         /// equal to zero.
         /// # Arguments
-        /// * `spec` - reference counted smart pointer to a GridSpec (Rc<S>)
+        /// * `spec` - reference counted smart pointer to a GridSpec
         /// # Examples
         /// ```
         /// use std::rc::Rc;
@@ -407,8 +407,8 @@ pub mod grid {
         /// GridScalar. Use this if you need to add/multiply/etc. the value
         /// of interest by the axis coordinate (e.g., x*dT/dx, or y+T).
         /// # Arguments
-        /// * `spec` - reference counted smart pointer to a GridSpec (Rc<S>)
-        /// * `dimension` - the axis for which the values are desired (usize)
+        /// * `spec` - reference counted smart pointer to a GridSpec
+        /// * `dimension` - the axis for which the values are desired
         /// # Examples
         /// ```
         /// use std::rc::Rc;
