@@ -620,15 +620,68 @@ pub mod stencil {
     extern crate ndarray_linalg;
     extern crate factorial;
 
+    /// The FdWeights struct contains the Stencil of points to use for a
+    /// finite difference approximation, the order of the derivative to
+    /// be approximated, and the "weights," or coefficients, that will
+    /// be multiplied by the values at the stencil points.
+    #[derive(Clone, Debug, PartialEq)]
     pub struct FdWeights {
+        /// The Stencil contains the relative positions of points to be
+        /// used in the finite difference approximation
         stencil: Stencil,
+        /// The order of the derivative to be approximated (1 -> d, 
+        /// 2 -> d2, etc.)
         nderiv: usize,
+        /// The accuracy of the approximation = number of stencil points
+        /// minus the derivative order
         accuracy: usize,
-        weights: crate::grid::ValVector, // ndarray::Array1<f64>,
+        /// The finite difference coefficients, or weights, contained in
+        /// a ValVector
+        weights: crate::grid::ValVector,
     }
 
-    // Called Operator1D in APC524 Main_PDE_Repo
     impl FdWeights {
+        /// Returns an FdWeights instance fully formed and populated with
+        /// the calculated coefficients. First creates a new Stencil
+        /// instance with Stencil::new(), which sorts and removes duplicate
+        /// values from the `slots` argument.
+        /// # Arguments
+        /// * `slots` - an array of integers representing the relative positions
+        /// of the neighboring points to be used in the approximation; this
+        /// argument will be sorted purged of duplicate values
+        /// * `nderiv` - the order of the derivative to be approximated
+        /// # Examples
+        /// ```
+        /// use rustencils::stencil::FdWeights;
+        /// let s = [-2,-1,0,1,2];
+        /// let d1 = FdWeights::new(&s[..], 1);
+        /// let d3 = FdWeights::new(&s[..], 3);
+        /// assert_eq!(d1.get_slots(), d3.get_slots());
+        /// ```
+        /// 
+        /// ```should_panic
+        /// use rustencils::stencil::FdWeights;
+        /// let s = [-1,0,1];
+        /// // panics because nderiv is not less than the length of s
+        /// let d3 = FdWeights::new(&s[..], 3);
+        /// ```
+        /// 
+        /// ```
+        /// use rustencils::stencil::FdWeights;
+        /// let s = [3,1,0,1,-1,-2,3];
+        /// let d2 = FdWeights::new(&s[..], 2);
+        /// assert_ne!(d2.get_slots(), &s[..]);
+        /// assert_eq!(d2.get_slots(), &[-2,-1,0,1,3]);
+        /// ```
+        /// 
+        /// ```
+        /// use rustencils::stencil::FdWeights;
+        /// let s = [-1,0,1];
+        /// let d1 = FdWeights::new(&s[..], 1);
+        /// let d2 = FdWeights::new(&s[..], 2);
+        /// assert_eq!(d1.get_weights()[0], -0.5);
+        /// assert_eq!(d2.get_weights()[0], 1.);
+        /// ```
         pub fn new(slots: &[isize], nderiv: usize) -> Self {
             let stncl = Stencil::new(slots);
             FdWeights {
@@ -639,6 +692,9 @@ pub mod stencil {
             }
         }
 
+        /// Solves a basic linear algebra problem to find the finite
+        /// difference coefficients for arbitrary stencil points. See:
+        /// https://en.wikipedia.org/wiki/Finite_difference_coefficient
         fn gen_fd_weights(stencil: &Stencil, nderiv: usize) -> ndarray::Array1<f64> {
             assert!(nderiv < stencil.num_slots,
                     "Derivative order must be less than number of stencil points!");
@@ -648,6 +704,9 @@ pub mod stencil {
             ndarray_linalg::Solve::solve_into(&matx, bvec).unwrap()
         }
 
+        /// Constructs the square matrix for use in generating the finite
+        /// difference coefficients. Each row of the matrix is the set of
+        /// stencil points raised to the power of the row index.
         fn init_matrix(slots: &[isize]) -> ndarray::Array2<f64> {
             let mut result = ndarray::Array2::<f64>::zeros((slots.len(), slots.len()));
             for i in 0..slots.len() {
@@ -658,33 +717,65 @@ pub mod stencil {
             result
         }
 
+        /// Returns a shared array slice containing the stencil point
+        /// positions.
         pub fn get_slots(&self) -> &[isize] {
-            &self.stencil.slot_pos[..]
+            &self.stencil.get_slots()
         }
 
+        /// Returns the value of the derivative order
         pub fn get_ord(&self) -> usize {
             self.nderiv
         }
 
+        /// Returns a shared reference to a rustencils::grid::ValVector
+        /// that contains the calculated finite difference coefficients
         pub fn get_weights(&self) -> &crate::grid::ValVector {
             &self.weights
         }
     }
 
+    /// The Stencil struct represents the stencil of points that will be used
+    /// to approximate some derivative. It simply contains a vector of the
+    /// stencil slot positions and the number of slots.
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Stencil {
+        /// A vector of the relative positions of the points to be used
         slot_pos: Vec<isize>,
+        /// The length of the `slot_pos` vector
         num_slots: usize,
     }
 
     impl Stencil {
-        pub fn new(slots: &[isize]) -> Self {
+        /// Returns a new Stencil instance. First sorts and removes duplicate
+        /// values from the input argument.
+        /// # Arguments
+        /// * `slots` - an array of integers representing the relative positions
+        /// of the neighboring points to be used in the approximation; this
+        /// argument will be sorted purged of duplicate values
+        fn new(slots: &[isize]) -> Self {
             let mut slots_vec = Vec::from(slots);
             slots_vec.sort_unstable();
+            slots_vec.dedup();
             Stencil {
                 num_slots: slots.len(),
                 slot_pos: slots_vec,
             }
         }
+
+        /// Returns a shared array slice containing the stencil point
+        /// positions.
+        fn get_slots(&self) -> &[isize] {
+            &self.slot_pos[..]
+        }
+    }
+    
+    #[test]
+    fn check_slots() {
+        let slots = [3,1,0,1,-1,-2,3];
+        let stncl = Stencil::new(&slots[..]);
+        assert_ne!(stncl.get_slots(), &slots[..]);
+        assert_eq!(stncl.get_slots(), &[-2,-1,0,1,3]);
     }
 }
 
@@ -692,20 +783,95 @@ pub mod operator {
     
     extern crate ndarray;
     
-    // The full 1D operator construction with finite difference weights
-    // corresponding to the interior region, as well as the edges.
-    // The basis direction refers to the dimension along which the
-    // operator should be applied: [0][1][2] corresponding to
-    // [x][y][z] of GridScalar.grididxs
+    /// The full 1D operator construction with finite difference weights
+    /// corresponding to the interior region, as well as those for the edges.
+    /// The basis direction refers to the dimension along which the
+    /// operator should be applied (e.g., [0][1][2] corresponding to
+    /// [x][y][z] in Cartesian coordinates
+    #[derive(Debug)]
     pub struct Operator1D<E> {
-        interior: super::stencil::FdWeights,
+        /// An instance of rustencils::stencil::FdWeights holding the finite
+        /// difference coefficients used on the interior region of the grid
+        interior: crate::stencil::FdWeights,
+        /// A set of rustencils::stencil::FdWeights instances holding the
+        /// finite difference coefficients used at the edges of the grid
+        /// where the interior stencil will not fit
         edge: E,
+        /// Axis with respect to which the derivative will be taken (e.g.,
+        /// 0 -> d/dx, 1 -> d/dy, etc.)
         basis_direction: usize,
+        /// The order of the derivative
         deriv_ord: usize,
     }
 
     impl<E> Operator1D<E> where E: EdgeOperator {
-        pub fn new(interior: super::stencil::FdWeights, edge: E, direction: usize) -> Self {
+        /// Returns a new Operator1D instance. Ensures that edge and interior
+        /// FdWeights instances are all calculated for the same derivative
+        /// order. Also calls the EdgeOperator `check_edges()` function to
+        /// verify proper edge construction.
+        /// # Arguments
+        /// * `interior` - FdWeights instance that will be used for the
+        /// interior region of the grid
+        /// * `edge` - an object that implements EdgeOperator that holds
+        /// FdWeights instances used for the grid edges
+        /// * `direction` - the axis with respect to which the derivative
+        /// will be taken (e.g., 0 -> d/dx, 1 -> d/dy, etc.)
+        /// # Examples
+        /// ```
+        /// use std::rc::Rc;
+        /// use rustencils::stencil::FdWeights;
+        /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+        /// use rustencils::operator::{Operator1D, FixedEdgeOperator};
+        /// 
+        /// // First initialize the grid objects
+        /// let x_init = AxisSetup::new(0., 0.01, 100);
+        /// let y_init = x_init.clone();
+        /// let axs_init = vec![x_init, y_init];
+        /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
+        /// let temperature = GridScalar::zeros(Rc::clone(&spec));
+        /// 
+        /// // Next construct the interior and edge arguments for a 2nd order derivative
+        /// let wts_2nd_int = FdWeights::new(&[-2,-1,0,1,2], 2);
+        /// 
+        /// let wts_2nd_L0 = FdWeights::new(&[0,1,2,3,4], 2);
+        /// let wts_2nd_L1 = FdWeights::new(&[-1,0,1,2,3], 2);
+        /// let wts_2nd_L = vec![wts_2nd_L0, wts_2nd_L1];
+        /// 
+        /// let wts_2nd_R0 = FdWeights::new(&[-4,-3,-2,-1,0], 2);
+        /// let wts_2nd_R1 = FdWeights::new(&[-3,-2,-1,0,1], 2);
+        /// let wts_2nd_R = vec![wts_2nd_R0, wts_2nd_R1];
+        /// 
+        /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
+        /// 
+        /// // Next construct the full Operator1D instances
+        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
+        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+        /// ```
+        /// 
+        /// ```should_panic
+        /// use rustencils::stencil::FdWeights;
+        /// use rustencils::operator::{Operator1D, FixedEdgeOperator};
+        /// 
+        /// // Construct the interior and edge arguments for a 2nd order derivative
+        /// let wts_2nd_int = FdWeights::new(&[-2,-1,0,1,2], 2);
+        /// 
+        /// let wts_2nd_L0 = FdWeights::new(&[0,1,2,3,4], 2);
+        /// let wts_2nd_L1 = FdWeights::new(&[-1,0,1,2,3], 2);
+        /// let wts_2nd_L = vec![wts_2nd_L0, wts_2nd_L1];
+        /// 
+        /// let wts_2nd_R0 = FdWeights::new(&[-4,-3,-2,-1,0], 2);
+        /// let wts_2nd_R = vec![wts_2nd_R0];
+        /// 
+        /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
+        /// 
+        /// // Next construct the full Operator1D instances
+        /// // Panics because the right edge does not have enough FdWeights!
+        /// // Remember that each FdWeights in the edge is only applied once
+        /// // and they are applied from the outside of the grid to the interior
+        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
+        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+        /// ```
+        pub fn new(interior: crate::stencil::FdWeights, edge: E, direction: usize) -> Self {
             let deriv_ord = interior.get_ord();
             for elm in edge.get_left() {
                 assert_eq!(deriv_ord, elm.get_ord());
@@ -713,7 +879,7 @@ pub mod operator {
             for elm in edge.get_right() {
                 assert_eq!(deriv_ord, elm.get_ord());
             }
-            edge.check_edges(&interior);
+            let _ = edge.check_edges(&interior);
             Operator1D {
                 interior,
                 edge,
@@ -722,19 +888,20 @@ pub mod operator {
             }
         }
 
+        /// Retruns the order of the derivative
         pub fn get_ord(&self) -> usize {
             self.deriv_ord
         }
     }
 
     pub trait EdgeOperator {
-        fn check_edges(&self, weights_int: &super::stencil::FdWeights) -> Result<(), &'static str>;
-        fn check_left_edge(&self, weights_int: &super::stencil::FdWeights);
-        fn check_right_edge(&self, weights_int: &super::stencil::FdWeights);
-        fn get_left_mut(&mut self) -> &mut Vec<super::stencil::FdWeights>;
-        fn get_right_mut(&mut self) -> &mut Vec<super::stencil::FdWeights>;
-        fn get_left(&self) -> &Vec<super::stencil::FdWeights>;
-        fn get_right(&self) -> &Vec<super::stencil::FdWeights>;
+        fn check_edges(&self, weights_int: &crate::stencil::FdWeights) -> Result<(), &'static str>;
+        fn check_left_edge(&self, weights_int: &crate::stencil::FdWeights);
+        fn check_right_edge(&self, weights_int: &crate::stencil::FdWeights);
+        fn get_left_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights>;
+        fn get_right_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights>;
+        fn get_left(&self) -> &Vec<crate::stencil::FdWeights>;
+        fn get_right(&self) -> &Vec<crate::stencil::FdWeights>;
     }
 
     // NOTE: "Fixed" refers to the fact that the bounds are NOT periodic! The
@@ -743,14 +910,15 @@ pub mod operator {
     // be applied from the outside-in (i.e. the first element in the vector will apply
     // to the outermost point, and so on). The user is responsible for ensuring adequate
     // edge operator construction given the structure of the interior operator.
+    #[derive(Clone, Debug)]
     pub struct FixedEdgeOperator {
         edge_type: String,
-        left: Vec<super::stencil::FdWeights>,
-        right: Vec<super::stencil::FdWeights>,
+        left: Vec<crate::stencil::FdWeights>,
+        right: Vec<crate::stencil::FdWeights>,
     }
 
     impl EdgeOperator for FixedEdgeOperator {
-        fn check_edges(&self, weights_int: &super::stencil::FdWeights) -> Result<(), &'static str> {
+        fn check_edges(&self, weights_int: &crate::stencil::FdWeights) -> Result<(), &'static str> {
             match weights_int.get_slots().iter().min() {
                 Some(x) if x < &0 => self.check_left_edge(weights_int),
                 Some(_) => {},
@@ -764,29 +932,29 @@ pub mod operator {
             Ok(())
         }
 
-        fn check_left_edge(&self, weights_int: &super::stencil::FdWeights) {
-            assert_eq!(weights_int.get_slots().iter().min().unwrap(), &(self.left.len() as isize), "Improper number of left edge stencils!");
+        fn check_left_edge(&self, weights_int: &crate::stencil::FdWeights) {
+            assert_eq!(weights_int.get_slots().iter().min().unwrap(), &-(self.left.len() as isize), "Improper number of left edge stencils!");
             for (n, item) in self.left.iter().enumerate() {
                 assert!(item.get_slots().iter().min().unwrap() >= &(0-(n as isize)), "Edge stencil out of range!");
             }
         }
 
-        fn check_right_edge(&self, weights_int: &super::stencil::FdWeights) {
+        fn check_right_edge(&self, weights_int: &crate::stencil::FdWeights) {
             assert_eq!(weights_int.get_slots().iter().max().unwrap(), &(self.right.len() as isize), "Improper number of right edge stencils!");
             for (n, item) in self.right.iter().enumerate() {
                 assert!(item.get_slots().iter().max().unwrap() <= &(n as isize), "Edge stencil out of range!");
             }
         }
 
-        fn get_left_mut(&mut self) -> &mut Vec<super::stencil::FdWeights> { &mut self.left }
-        fn get_right_mut(&mut self) -> &mut Vec<super::stencil::FdWeights> { &mut self.right }
-        fn get_left(&self) -> &Vec<super::stencil::FdWeights> { &self.left }
-        fn get_right(&self) -> &Vec<super::stencil::FdWeights> { &self.right }
+        fn get_left_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights> { &mut self.left }
+        fn get_right_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights> { &mut self.right }
+        fn get_left(&self) -> &Vec<crate::stencil::FdWeights> { &self.left }
+        fn get_right(&self) -> &Vec<crate::stencil::FdWeights> { &self.right }
     }
 
     impl FixedEdgeOperator {
-        pub fn new(left_edge_ops: Vec<super::stencil::FdWeights>,
-                   right_edge_ops: Vec<super::stencil::FdWeights>) -> Self {
+        pub fn new(left_edge_ops: Vec<crate::stencil::FdWeights>,
+                   right_edge_ops: Vec<crate::stencil::FdWeights>) -> Self {
             FixedEdgeOperator {
                 edge_type: String::from("fixed"),
                 left: left_edge_ops,
@@ -802,7 +970,7 @@ pub mod operator {
     }
 
     impl OperatorMatrix {
-        pub fn of<Q, S>(&self, qty: Q) -> Q
+        pub fn of<Q, S>(&self, qty: &Q) -> Q
         where Q: GridQty<S>, S: GridSpec {
             assert_eq!(qty.get_gridvals().len(), self.shape.0);
             let result = self.matrix.dot(qty.get_gridvals().as_ndarray());

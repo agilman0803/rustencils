@@ -12,3 +12,9 @@ license = "MIT OR GPL-3.0+"
 ndarray = "0.14.0"
 ndarray-linalg = "0.13.1"
 factorial = "0.2.1"
+
+[features]
+default = ["openblas"]
+openblas = ["ndarray-linalg/openblas"]
+netlib = ["ndarray-linalg/netlib"]
+intel-mkl = ["ndarray-linalg/intel-mkl"]
