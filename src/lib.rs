@@ -31,6 +31,99 @@ pub mod grid {
         }
     }
     
+    /// The ValVector struct simply stores a 1D array containing the quantity
+    /// of interest at each point on the grid.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct ValVector(pub(crate) ndarray::Array1<f64>);
+
+    impl ValVector {
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            if self.len() == 0 { true }
+            else { false }
+        }
+
+        fn vals(&self) -> &ndarray::Array1<f64> {
+            &self.0
+        }
+
+        pub(crate) fn as_ndarray(&self) -> &ndarray::Array1<f64> {
+            self.vals()
+        }
+    }
+
+    impl core::ops::Index<usize> for ValVector {
+        type Output = f64;
+
+        fn index(self: &'_ Self, index: usize) -> &'_ Self::Output {
+            &self.0[index]
+        }
+    }
+
+    impl core::ops::IndexMut<usize> for ValVector {
+        fn index_mut(self: &'_ mut Self, index: usize) -> &'_ mut Self::Output {
+            &mut self.0[index]
+        }
+    }
+    
+    /// For consistency, this AxisSetup struct is used as an argument when
+    /// constructing GridSpecs. It contains the minimum axis value
+    /// (`start: f64`), the spacing of the axis points (`delta: f64`),
+    /// and the number of axis points including the start value
+    /// (`steps: usize`).
+    #[derive(Clone)]
+    pub struct AxisSetup {
+        start: f64,
+        delta: f64,
+        steps: usize,
+    }
+
+    impl AxisSetup {
+        /// Returns an AxisSetup
+        /// # Arguments
+        /// * `start` - the minimum axis value
+        /// * `delta` - the spacing btween axis points
+        /// * `steps` - the number of axis points including start
+        /// # Examples
+        /// ```should_panic
+        /// use rustencils::grid::AxisSetup;
+        /// let ax = AxisSetup::new(0., 0., 100);
+        /// ```
+        /// 
+        /// ```should_panic
+        /// use rustencils::grid::AxisSetup;
+        /// let ax = AxisSetup::new(0., 0.1, 0);
+        /// ```
+        /// 
+        /// ```
+        /// use rustencils::grid::AxisSetup;
+        /// let ax = AxisSetup::new(0., 0.1, 100);
+        /// ```
+        pub fn new(start: f64, delta: f64, steps: usize) -> Self {
+            assert_ne!(delta, 0., "Delta cannot be zero!");
+            assert_ne!(steps, 0, "Steps cannot be zero!");
+            assert_ne!(steps, 1, "Steps cannot be one!");
+            AxisSetup {
+                delta: delta.abs(),
+                start,
+                steps,
+            }
+        }
+    }
+
+    /// The Point struct represents a single point on the Grid. Each Point
+    /// contains a vector of the axis values at that Point, as well as an
+    /// index that corresponds to the position within the GridQty that
+    /// represents the value of interest at that Point.
+    #[derive(Default, Clone, Debug, PartialEq)]
+    pub struct Point {
+        pub(crate) coord: Vec<f64>,
+        pub(crate) idx: usize,
+    }
+
     /// Since the physical space of the PDE can be defined in multiple
     /// coordinate systems, the GridSpec trait is used to identify those
     /// structs that can be used for this purpose. The trait defines the
@@ -115,61 +208,6 @@ pub mod grid {
         }
     }
 
-    /// For consistency, this AxisSetup struct is used as an argument when
-    /// constructing GridSpecs. It contains the minimum axis value
-    /// (`start: f64`), the spacing of the axis points (`delta: f64`),
-    /// and the number of axis points including the start value
-    /// (`steps: usize`).
-    #[derive(Clone)]
-    pub struct AxisSetup {
-        start: f64,
-        delta: f64,
-        steps: usize,
-    }
-
-    impl AxisSetup {
-        /// Returns an AxisSetup
-        /// # Arguments
-        /// * `start` - the minimum axis value
-        /// * `delta` - the spacing btween axis points
-        /// * `steps` - the number of axis points including start
-        /// # Examples
-        /// ```should_panic
-        /// use rustencils::grid::AxisSetup;
-        /// let ax = AxisSetup::new(0., 0., 100);
-        /// ```
-        /// 
-        /// ```should_panic
-        /// use rustencils::grid::AxisSetup;
-        /// let ax = AxisSetup::new(0., 0.1, 0);
-        /// ```
-        /// 
-        /// ```
-        /// use rustencils::grid::AxisSetup;
-        /// let ax = AxisSetup::new(0., 0.1, 100);
-        /// ```
-        pub fn new(start: f64, delta: f64, steps: usize) -> Self {
-            assert_ne!(delta, 0., "Delta cannot be zero!");
-            assert_ne!(steps, 0, "Steps cannot be zero!");
-            assert_ne!(steps, 1, "Steps cannot be one!");
-            AxisSetup {
-                delta: delta.abs(),
-                start,
-                steps,
-            }
-        }
-    }
-
-    /// The Point struct represents a single point on the Grid. Each Point
-    /// contains a vector of the axis values at that Point, as well as an
-    /// index that corresponds to the position within the GridQty that
-    /// represents the value of interest at that Point.
-    #[derive(Default, Clone, Debug, PartialEq)]
-    pub struct Point {
-        pub(crate) coord: Vec<f64>,
-        pub(crate) idx: usize,
-    }
-
     impl CartesianGridSpec {
         // Potential issue with casting usize to f64 if high precision required for
         // axis values.
@@ -238,44 +276,6 @@ pub mod grid {
         }
     }
 
-    /// The ValVector struct simply stores a 1D array containing the quantity
-    /// of interest at each point on the grid.
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct ValVector(pub(crate) ndarray::Array1<f64>);
-
-    impl ValVector {
-        pub fn len(&self) -> usize {
-            self.0.len()
-        }
-
-        pub fn is_empty(&self) -> bool {
-            if self.len() == 0 { true }
-            else { false }
-        }
-
-        fn vals(&self) -> &ndarray::Array1<f64> {
-            &self.0
-        }
-
-        pub(crate) fn as_ndarray(&self) -> &ndarray::Array1<f64> {
-            self.vals()
-        }
-    }
-
-    impl core::ops::Index<usize> for ValVector {
-        type Output = f64;
-
-        fn index(self: &'_ Self, index: usize) -> &'_ Self::Output {
-            &self.0[index]
-        }
-    }
-
-    impl core::ops::IndexMut<usize> for ValVector {
-        fn index_mut(self: &'_ mut Self, index: usize) -> &'_ mut Self::Output {
-            &mut self.0[index]
-        }
-    }
-    
     /// The GridQty trait is meant to leave open the possibility of in the
     /// future adding something like a GridVector struct that would store
     /// a vector value for each point on the grid as opposed to the scalar
@@ -894,26 +894,64 @@ pub mod operator {
         }
     }
 
+    /// Since the edges of the grid can be defined in multiple ways (e.g.,
+    /// non-periodic -- called "fixed" in this crate -- vs periodic) the
+    /// EdgeOperator trait is used to identify those structs that can be
+    /// used for this purpose. The trait defines the necessary methods for
+    /// a struct that specifies a type of grid edge construction. For
+    /// example, this trait is implemented by the FixedEdgeOperator type.
+    /// NOTE: that the boundary conditions are separate from the edge
+    /// operator and are specified elsewhere.
     pub trait EdgeOperator {
+        /// Returns a Result<(), &'static str> depending on whether the edges
+        /// are constructed properly. It is also valid to simply panic when
+        /// the edge construction is not correct. Generally advisable to just
+        /// include logic about when to check which edge and conditionally
+        /// call `check_left_edge` and `check_right_edge`.
+        /// # Arguments
+        /// * `weights_int` - the corresponding FdWeights instance used for
+        /// the interior of the grid
         fn check_edges(&self, weights_int: &crate::stencil::FdWeights) -> Result<(), &'static str>;
+        /// Check and assert the construction of the left edge is correct.
+        /// Panics if it is not correct.
+        /// # Arguments
+        /// * `weights_int` - the corresponding FdWeights instance used for
+        /// the interior of the grid
         fn check_left_edge(&self, weights_int: &crate::stencil::FdWeights);
+        /// Check and assert the construction of the right edge is correct.
+        /// Panics if it is not correct.
+        /// # Arguments
+        /// * `weights_int` - the corresponding FdWeights instance used for
+        /// the interior of the grid
         fn check_right_edge(&self, weights_int: &crate::stencil::FdWeights);
+        /// Returns an exclusive reference to the vector of left edge
+        /// FdWeights
         fn get_left_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights>;
+        /// Returns an exclusive reference to the vector of right edge
+        /// FdWeights
         fn get_right_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights>;
+        /// Returns a shared reference to the vector of left edge FdWeights
         fn get_left(&self) -> &Vec<crate::stencil::FdWeights>;
+        /// Returns a shared reference to the vector of right edge FdWeights
         fn get_right(&self) -> &Vec<crate::stencil::FdWeights>;
     }
 
-    // NOTE: "Fixed" refers to the fact that the bounds are NOT periodic! The
-    // boundary conditions can still be of any type and must be specified separately!
-    // The left (more negative side) and right (more positive side) edge operators will
-    // be applied from the outside-in (i.e. the first element in the vector will apply
-    // to the outermost point, and so on). The user is responsible for ensuring adequate
-    // edge operator construction given the structure of the interior operator.
+    /// The FixedEdgeOperator struct contains vectors of rustencils::stencil::FdWeights.
+    /// One vector for the left edge and one vector for the right edge.
+    /// NOTE: "Fixed" refers to the fact that the bounds are NOT periodic! The
+    /// boundary conditions can still be of any type and must be specified separately!
+    /// The left (more negative side) and right (more positive side) edge operators will
+    /// be applied from the outside-in (i.e. the first element in the vector will apply
+    /// to the outermost point, and so on) and each element is only applied once. The
+    /// user is responsible for ensuring adequate edge operator construction given the
+    /// structure of the interior operator.
     #[derive(Clone, Debug)]
     pub struct FixedEdgeOperator {
+        /// The type of edge operator. Constructor sets this to "fixed"
         edge_type: String,
+        /// A vector of FdWeights to be applied to the left edge
         left: Vec<crate::stencil::FdWeights>,
+        /// A vector of FdWeights to be applied to the right edge
         right: Vec<crate::stencil::FdWeights>,
     }
 
@@ -953,6 +991,30 @@ pub mod operator {
     }
 
     impl FixedEdgeOperator {
+        /// Returns a FixedEdgeOperator. Sets the `edge_type` to "fixed".
+        /// # Arguments
+        /// * `left_edge_ops` - a vector of FdWeights for the left edge
+        /// * `right_edge_ops` - a vector of FdWeights for the right edge
+        /// # Examples
+        /// ```
+        /// use rustencils::stencil::FdWeights;
+        /// use rustencils::operator::{EdgeOperator, FixedEdgeOperator};
+        /// 
+        /// // Construct the interior and edge arguments for a 2nd order derivative
+        /// let wts_2nd_int = FdWeights::new(&[-2,-1,0,1,2], 2);
+        /// 
+        /// let wts_2nd_L0 = FdWeights::new(&[0,1,2,3,4], 2);
+        /// let wts_2nd_L1 = FdWeights::new(&[-1,0,1,2,3], 2);
+        /// let wts_2nd_L = vec![wts_2nd_L0, wts_2nd_L1];
+        /// 
+        /// let wts_2nd_R0 = FdWeights::new(&[-4,-3,-2,-1,0], 2);
+        /// let wts_2nd_R1 = FdWeights::new(&[-3,-2,-1,0,1], 2);
+        /// let wts_2nd_R = vec![wts_2nd_R0, wts_2nd_R1];
+        /// 
+        /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
+        /// 
+        /// edge_wts_2nd.check_edges(&wts_2nd_int);
+        /// ```
         pub fn new(left_edge_ops: Vec<crate::stencil::FdWeights>,
                    right_edge_ops: Vec<crate::stencil::FdWeights>) -> Self {
             FixedEdgeOperator {
@@ -963,23 +1025,186 @@ pub mod operator {
         }
     }
 
+    /// The OperatorMatrix struct represents the 2D matrix linear operator
+    /// approximating some derivative. Holds the matrix and the shape of
+    /// the matrix.
     pub struct OperatorMatrix {
+        /// The shape of the matrix: (rows, columns)
         shape: (usize, usize),
+        /// The actual matrix, here implemented with ndarray
         matrix: ndarray::Array2<f64>,
-        // populator: Option<MatrixPopulator>,
     }
 
     impl OperatorMatrix {
-        pub fn of<Q, S>(&self, qty: &Q) -> Q
+        /// Returns a new GridQty that is the result of taking the inner
+        /// product of the OperatorMatrix with the GridQty passed in as
+        /// argument. This is the approximation of taking a derivative.
+        /// # Arguments
+        /// * `qty` - an object to be differentiated that implements
+        /// rustencils::grid::GridQty
+        /// # Examples
+        /// ```
+        /// use std::rc::Rc;
+        /// use rustencils::stencil::FdWeights;
+        /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+        /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
+        /// use rustencils::operator::construct_op;
+        /// 
+        /// // First initialize the grid objects
+        /// let x_init = AxisSetup::new(0., 0.01, 100);
+        /// let y_init = x_init.clone();
+        /// let axs_init = vec![x_init, y_init];
+        /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
+        /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 0);
+        /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 1);
+        /// // T will represent temperature
+        /// let T = 100. * &( &( &x_vals * &x_vals) * &( &y_vals * &y_vals) );
+        /// 
+        /// // Next construct the interior and edge arguments for a 2nd order derivative
+        /// let wts_2nd_int = FdWeights::new(&[-2,-1,0,1,2], 2);
+        /// 
+        /// let wts_2nd_L0 = FdWeights::new(&[0,1,2,3,4], 2);
+        /// let wts_2nd_L1 = FdWeights::new(&[-1,0,1,2,3], 2);
+        /// let wts_2nd_L = vec![wts_2nd_L0, wts_2nd_L1];
+        /// 
+        /// let wts_2nd_R0 = FdWeights::new(&[-4,-3,-2,-1,0], 2);
+        /// let wts_2nd_R1 = FdWeights::new(&[-3,-2,-1,0,1], 2);
+        /// let wts_2nd_R = vec![wts_2nd_R0, wts_2nd_R1];
+        /// 
+        /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
+        /// 
+        /// // Next construct the full Operator1D instances
+        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
+        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+        /// 
+        /// // Construct OperatorMatrix instances
+        /// let d2dx2 = construct_op(op1d_2nd_x, &T);
+        /// let d2dy2 = construct_op(op1d_2nd_y, &T);
+        /// 
+        /// // Differentiate T
+        /// let d2Tdx2 = d2dx2.of_qty(&T);
+        /// let d2Tdy2 = d2dy2.of_qty(&T);
+        /// 
+        /// // Can also construct more complex operator!
+        /// let Del2 = &d2dx2 + &d2dy2;
+        /// let Del2T = Del2.of_qty(&T);
+        /// ```
+        pub fn of_qty<Q, S>(&self, qty: &Q) -> Q
         where Q: GridQty<S>, S: GridSpec {
             assert_eq!(qty.get_gridvals().len(), self.shape.0);
             let result = self.matrix.dot(qty.get_gridvals().as_ndarray());
             GridQty::new(qty.get_spec(), crate::grid::ValVector(result))
         }
+
+        /// Returns a new OperatorMatrix that is the result of taking the
+        /// inner product of the OperatorMatrix (self) with the
+        /// OperatorMarix passed in as argument.
+        /// # Arguments
+        /// * `other` - another OperatorMatrix instance
+        /// # Examples
+        /// ```
+        /// use std::rc::Rc;
+        /// use rustencils::stencil::FdWeights;
+        /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+        /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
+        /// use rustencils::operator::construct_op;
+        /// 
+        /// // First initialize the grid objects
+        /// let x_init = AxisSetup::new(0., 0.01, 100);
+        /// let y_init = x_init.clone();
+        /// let axs_init = vec![x_init, y_init];
+        /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
+        /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 0);
+        /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 1);
+        /// // T will represent temperature
+        /// let T = 100. * &( &( &x_vals * &x_vals) * &( &y_vals * &y_vals) );
+        /// 
+        /// // Next construct the interior and edge arguments for a 2nd order derivative
+        /// let wts_2nd_int = FdWeights::new(&[-2,-1,0,1,2], 2);
+        /// 
+        /// let wts_2nd_L0 = FdWeights::new(&[0,1,2,3,4], 2);
+        /// let wts_2nd_L1 = FdWeights::new(&[-1,0,1,2,3], 2);
+        /// let wts_2nd_L = vec![wts_2nd_L0, wts_2nd_L1];
+        /// 
+        /// let wts_2nd_R0 = FdWeights::new(&[-4,-3,-2,-1,0], 2);
+        /// let wts_2nd_R1 = FdWeights::new(&[-3,-2,-1,0,1], 2);
+        /// let wts_2nd_R = vec![wts_2nd_R0, wts_2nd_R1];
+        /// 
+        /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
+        /// 
+        /// // Next construct the full Operator1D instances
+        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
+        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+        /// 
+        /// // Construct OperatorMatrix instances
+        /// let d2dx2 = construct_op(op1d_2nd_x, &T);
+        /// let d2dy2 = construct_op(op1d_2nd_y, &T);
+        /// 
+        /// // Differentiate T
+        /// let d2Tdy2 = d2dy2.of_qty(&T);
+        /// let d4Tdx2dy2 = d2dx2.of_qty(&d2Tdy2);
+        /// 
+        /// // Can also construct more complex operator!
+        /// let d4dx2dy2 = d2dx2.of_mtx(&d2dy2);
+        /// let d4Tdx2dy2 = d4dx2dy2.of_qty(&T);
+        /// ```
+        pub fn of_mtx(&self, other: &OperatorMatrix) -> Self {
+            if self.shape == other.shape {
+                let result = self.matrix.dot(&other.matrix);
+                OperatorMatrix {
+                    shape: self.shape,
+                    matrix: result,
+                }
+            }
+            else{ panic!("Error taking inner product of OperatorMatrix! Ensure shapes are the same.") }
+        }
     }
 
     use crate::grid::{GridQty, GridSpec};
 
+    /// Constructs a new OperatorMatrix based on an Operator1D and a GridQty
+    /// # Arguments
+    /// * `op1d` - an Operator1D instance
+    /// * `qty` - an instance of something that implements GridQty
+    /// # Examples
+    /// ```
+    /// use std::rc::Rc;
+    /// use rustencils::stencil::FdWeights;
+    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+    /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
+    /// use rustencils::operator::construct_op;
+    /// 
+    /// // First initialize the grid objects
+    /// let x_init = AxisSetup::new(0., 0.01, 100);
+    /// let y_init = x_init.clone();
+    /// let axs_init = vec![x_init, y_init];
+    /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
+    /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 0);
+    /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 1);
+    /// // T will represent temperature
+    /// let T = 100. * &( &( &x_vals * &x_vals) * &( &y_vals * &y_vals) );
+    /// 
+    /// // Next construct the interior and edge arguments for a 2nd order derivative
+    /// let wts_2nd_int = FdWeights::new(&[-2,-1,0,1,2], 2);
+    /// 
+    /// let wts_2nd_L0 = FdWeights::new(&[0,1,2,3,4], 2);
+    /// let wts_2nd_L1 = FdWeights::new(&[-1,0,1,2,3], 2);
+    /// let wts_2nd_L = vec![wts_2nd_L0, wts_2nd_L1];
+    /// 
+    /// let wts_2nd_R0 = FdWeights::new(&[-4,-3,-2,-1,0], 2);
+    /// let wts_2nd_R1 = FdWeights::new(&[-3,-2,-1,0,1], 2);
+    /// let wts_2nd_R = vec![wts_2nd_R0, wts_2nd_R1];
+    /// 
+    /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
+    /// 
+    /// // Next construct the full Operator1D instances
+    /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
+    /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+    /// 
+    /// // Construct OperatorMatrix instances
+    /// let d2dx2 = construct_op(op1d_2nd_x, &T);
+    /// let d2dy2 = construct_op(op1d_2nd_y, &T);
+    /// ```
     pub fn construct_op<Q, S, E>(op1d: Operator1D<E>, qty: &Q) -> OperatorMatrix
     where Q: GridQty<S>, S: GridSpec, E: EdgeOperator
     {
@@ -1015,6 +1240,36 @@ pub mod operator {
         OperatorMatrix {
             shape,
             matrix,
+        }
+    }
+
+    impl<'a, 'b> std::ops::Add<&'b OperatorMatrix> for &'a OperatorMatrix {
+        type Output = OperatorMatrix;
+
+        fn add(self, other: &'b OperatorMatrix) -> Self::Output {
+            if self.shape == other.shape {
+                let result = &self.matrix + &other.matrix;
+                OperatorMatrix {
+                    shape: self.shape,
+                    matrix: result,
+                }
+            }
+            else { panic!("Error adding OperatorMatrix instances! Ensure shapes are the same.") }
+        }
+    }
+
+    impl<'a, 'b> std::ops::Sub<&'b OperatorMatrix> for &'a OperatorMatrix {
+        type Output = OperatorMatrix;
+
+        fn sub(self, other: &'b OperatorMatrix) -> Self::Output {
+            if self.shape == other.shape {
+                let result = &self.matrix - &other.matrix;
+                OperatorMatrix {
+                    shape: self.shape,
+                    matrix: result,
+                }
+            }
+            else { panic!("Error subtracting OperatorMatrix instances! Ensure shapes are the same.") }
         }
     }
 }
