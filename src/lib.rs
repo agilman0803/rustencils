@@ -2,6 +2,8 @@
 pub mod grid {
 
     extern crate ndarray;
+    use std::rc::Rc;
+    use std::collections::HashMap;
 
     /// The Grid struct represents the physical space over which the PDE is defined.
     #[derive(Debug, PartialEq)]
@@ -120,7 +122,7 @@ pub mod grid {
     /// represents the value of interest at that Point.
     #[derive(Default, Clone, Debug, PartialEq)]
     pub struct Point {
-        pub(crate) coord: Vec<f64>,
+        pub(crate) coord: HashMap<char, f64>,
         pub(crate) idx: usize,
     }
 
@@ -132,30 +134,49 @@ pub mod grid {
     /// CartesianGridSpec type. It would also need to be implemented for
     /// a SphericalGridSpec or PolarGridSpec.
     pub trait GridSpec {
-        /// Returns a shared reference to the vector containing the sets
+        /// Returns a Vector of characters that represent the axis labels
+        fn axis_chars(&self) -> Vec<char>;
+        /// Returns a shared reference to the HashMap containing the sets
         /// of points along the coordinate axes that make up the grid
-        /// (e.g., [[x0,x1,x2,...,xm],[y0,y1,y2,...,yn]]).
-        fn get_coords(&self) -> &Vec<Vec<f64>>;
+        fn coords(&self) -> &HashMap<char, Vec<f64>>;
         /// Returns a usize that represents the dimensionality of the grid.
-        fn get_ndim(&self) -> usize;
-        /// Returns a shared reference to a vector that contains the number
-        /// of points along each axis (e.g., [m,n]).
-        fn get_gridshape(&self) -> &Vec<usize>;
-        /// Returns a shared reference to a vector that contains the spacing
-        /// between the points on the coordinate axes (e.g., [(x1-x0),(y1-y0)]).
-        fn get_spacing(&self) -> &Vec<f64>;
+        fn ndim(&self) -> usize;
+        /// Returns a shared reference to a HashMap that contains the number
+        /// of points along each axis.
+        fn gridshape(&self) -> &HashMap<char, usize>;
+        /// Returns a shared reference to a HashMap that contains the axis
+        /// indices for the grid.
+        fn grid_axes(&self) -> &HashMap<char, usize>;
+        /// Returns a shared reference to a HashMap that contains the spacing
+        /// between the points on the coordinate axes.
+        fn spacing(&self) -> &HashMap<char, f64>;
         /// Returns a shared reference to the Grid instance.
-        fn get_grid(&self) -> &Grid;
+        fn grid(&self) -> &Grid;
+        /// Returns a shared reference to a Vector of Points that represent the
+        /// boundary points along the specified axis. Here, the boundary
+        /// points refer to the outermost set of points along the edge of the
+        /// grid.
+        fn bound_pts(&self, axis: char, side: BoundarySide) -> &Vec<Point>;
+        /*
         /// Returns an owned vector of usizes that represent the index values
         /// of the boundary points along the specified axis. Here, the boundary
         /// points refer to the outermost set of points along the edge of the
         /// grid.
-        fn get_bound_idxs(&self, dimension: usize, side: crate::boundaries::BoundarySide) -> Vec<usize>;
-        /// Returns an owned vector of Point structs that represent the
-        /// boundary points along the specified axis. Here, the boundary
-        /// points refer to the outermost set of points along the edge of the
-        /// grid.
-        fn get_bound_pts(&self, dimesnion: usize, side: crate::boundaries::BoundarySide) -> Vec<Point>;
+        fn bound_idxs(&self, dimension: usize, side: crate::boundaries::BoundarySide) -> Vec<usize>;
+        */
+    }
+
+    pub enum BoundarySide {
+        Low,
+        High,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct BoundaryPoints {
+        /// Points that comprise the boundary at the low end of the axis
+        low: Vec<Point>,
+        /// Points that comprise the boundary at the high end of the axis
+        high: Vec<Point>,
     }
 
     /// The CartesianGridSpec struct represents the specifications of a
@@ -164,48 +185,58 @@ pub mod grid {
     /// Cartesian coordinate space.
     #[derive(Debug, PartialEq)]
     pub struct CartesianGridSpec {
-        /// Vector containing the sets of points along the coordinate axes
-        /// that make up the grid (e.g., [[x0,x1,x2,...,xm],[y0,y1,y2,...,yn]]).
-        coords: Vec<Vec<f64>>,
+        /// Vector of characters that represent the axis labels
+        /// (e.g., ['x','y','z']).
+        axis_chars: Vec<char>,
+        /// HashMap containing the sets of points along the coordinate axes
+        /// that make up the grid (e.g., { ('x', [x0,x1,x2,...,xm]),
+        /// ('y', [y0,y1,y2,...,yn]) }).
+        coords: HashMap<char, Vec<f64>>,
         /// A usize that represents the dimensionality of the grid.
         ndim: usize,
-        /// Vector that contains the number of points along each axis
-        /// (e.g., [m,n]).
-        gridshape: Vec<usize>,
-        /// Vector that contains the spacing between the points on the
-        /// coordinate axes (e.g., [(x1-x0),(y1-y0)]).
-        spacing: Vec<f64>,
+        /// HashMap that contains the number of points along each axis
+        /// (e.g., { ('x', m), ('y', n) }).
+        gridshape: HashMap<char, usize>,
+        /// HashMap that contains the axis number of the grid associated with each label
+        grid_axes: HashMap<char, usize>,
+        /// HashMap that contains the spacing between the points on the
+        /// coordinate axes (e.g., { ('x', (x1-x0)), ('y', (y1-y0)) }).
+        spacing: HashMap<char, f64>,
         /// The Grid instance specified by this struct.
         grid: Grid,
-        /// Vector containing the Points that correspond to the Grid
-        /// boundaries. The vector contains 2-element arrays. Each
-        /// array corresponds to a different axis, and each element
-        /// of the array corresponds to either the Low or High side
-        /// of that axis.
-        boundary_pts: Vec<[Vec<Point>;2]>,
+        /// HashMap containing the Points that correspond to the Grid
+        /// boundaries.
+        /// Points that are part of more than one boundary, such
+        /// as corners, are currently included and thus the behavior of 
+        /// values at these points may be undefined.
+        /// (e.g., { ('x', BoundaryPoints{...}), ('y', BoundaryPoints{...}) })
+        boundary_pts: HashMap<char, BoundaryPoints>,
     }
 
     impl GridSpec for CartesianGridSpec {
-        fn get_coords(&self) -> &Vec<Vec<f64>> { &self.coords }
-        fn get_ndim(&self) -> usize { self.ndim }
-        fn get_gridshape(&self) -> &Vec<usize> { &self.gridshape }
-        fn get_spacing(&self) -> &Vec<f64> { &self.spacing }
-        fn get_grid(&self) -> &Grid { &self.grid }
+        fn axis_chars(&self) -> Vec<char> { self.axis_chars.clone() }
+        fn coords(&self) -> &HashMap<char, Vec<f64>> { &self.coords }
+        fn ndim(&self) -> usize { self.ndim }
+        fn gridshape(&self) -> &HashMap<char, usize> { &self.gridshape }
+        fn grid_axes(&self) -> &HashMap<char, usize> { &self.grid_axes }
+        fn spacing(&self) -> &HashMap<char, f64> { &self.spacing }
+        fn grid(&self) -> &Grid { &self.grid }
         
-        fn get_bound_pts(&self, dimension: usize, side: crate::boundaries::BoundarySide) -> Vec<Point> {
-            let side_idx = match side {
-                crate::boundaries::BoundarySide::Low => 0,
-                crate::boundaries::BoundarySide::High => 1,
-            };
-            self.boundary_pts[dimension][side_idx].clone()
+        fn bound_pts(&self, axis: char, side: BoundarySide) -> &Vec<Point> {
+            match side {
+                BoundarySide::Low => &self.boundary_pts[&axis].low,
+                BoundarySide::High => &self.boundary_pts[&axis].high,
+            }
         }
 
-        fn get_bound_idxs(&self, dimension: usize, side: crate::boundaries::BoundarySide) -> Vec<usize> {
-            let pts = self.get_bound_pts(dimension, side);
+        /*
+        fn bound_idxs(&self, dimension: usize, side: crate::boundaries::BoundarySide) -> Vec<usize> {
+            let pts = self.bound_pts(dimension, side);
             let mut idxs = Vec::new();
             for pt in pts.iter() { idxs.push(pt.idx); }
             idxs
         }
+        */
     }
 
     impl CartesianGridSpec {
@@ -222,52 +253,59 @@ pub mod grid {
         /// let y = x.clone();
         /// let axs = vec![x, y];
         /// let spec = CartesianGridSpec::new(axs);
-        /// assert_eq!(spec.get_gridshape(), &vec![100,100]);
-        /// assert_eq!(spec.get_spacing(), &vec![0.01,0.01]);
+        /// assert_eq!(spec.gridshape(), &vec![100,100]);
+        /// assert_eq!(spec.spacing(), &vec![0.01,0.01]);
         /// ```
-        pub fn new(axes: Vec<AxisSetup>) -> Self {
+        pub fn new(axes: HashMap<char, AxisSetup>) -> Self {
+            let axis_chars: Vec<char> = axes.iter().map(|(label, _)| *label).collect();
+            // grid_axes holds the axis index values that correspond to the axes of the grid object
+            let grid_axes: HashMap<char, usize> = axis_chars.iter().enumerate().map(|(index, label)| (*label, index)).collect();
             // gridshape holds the number of steps for each axis
-            let gridshape: Vec<usize> = axes.iter().map(|ax| ax.steps).collect();
+            let gridshape: HashMap<char, usize> = axes.iter().map(|(label, axis)| (*label, axis.steps)).collect();
             // calculate the full set of coordinates for each axis based on the
             // AxisSetup specifications
-            let coords: Vec<Vec<f64>> = axes.iter().map(|ax| {
-                    let mut set = Vec::with_capacity(ax.steps);
-                    for i in 0..ax.steps {set.push(ax.start + (i as f64)*ax.delta);}
-                    set
+            let coords: HashMap<char, Vec<f64>> = axes.iter().map(|(label, axis)| {
+                    let mut set = Vec::with_capacity(axis.steps);
+                    for i in 0..axis.steps {set.push(axis.start + (i as f64)*axis.delta);}
+                    (*label, set)
                 }).collect();
             // spacing holds the delta value for each axis
-            let spacing: Vec<f64> = axes.iter().map(|ax| ax.delta).collect();
+            let spacing: HashMap<char, f64> = axes.iter().map(|(label, axis)| (*label, axis.delta)).collect();
             // initialize the grid with default values
-            let mut grid: ndarray::ArrayD<Point> = ndarray::Array::default(gridshape.clone());
+            let mut grid_init_vec: Vec<usize> = vec![0; axis_chars.len()];
+            let _: () = grid_axes.iter().map(|(label, axnum)| {
+                grid_init_vec[*axnum] = gridshape[label];
+            }).collect();
+            let mut grid: ndarray::ArrayD<Point> = ndarray::Array::default(grid_init_vec);
             let mut count = 0;
             // popluate the grid with Point structs based on coordinates
-            let _ = grid.indexed_iter_mut().map(|(indices,pt)| {
-                pt.coord = Vec::new();
-                for i in 0..coords.len() {
-                    pt.coord.push(coords[i][indices[i]]);
+            let _: () = grid.indexed_iter_mut().map(|(indices,pt)| {
+                pt.coord = HashMap::new();
+                for ax in axis_chars.iter() {
+                    pt.coord.insert(*ax, coords[ax][indices[grid_axes[ax]]]);
                 }
                 pt.idx = count;
                 count += 1;
-            }).collect::<()>();
-            let mut boundary_pts: Vec<[Vec<Point>;2]> = Vec::new();
-            // populate the boundary points vector
-            for i in 0..axes.len() {
-                boundary_pts.push([Vec::new(), Vec::new()]);
-                for j in 0..2 {
-                    let slc = match j {
-                        0 => grid.slice_axis(ndarray::Axis(i), ndarray::Slice::from(0..1)),
-                        1 => grid.slice_axis(ndarray::Axis(i), ndarray::Slice::from(-1..-2)),
-                        _ => panic!("Error while constructing grid boundary points!"),
-                    };
-
-                    for pt in slc.iter() {
-                        boundary_pts[i][j].push(pt.clone());
-                    }
-                }
+            }).collect();
+            let mut boundary_pts: HashMap<char, BoundaryPoints> = HashMap::new();
+            // populate the boundary points
+            for ax in axis_chars.iter() {
+                let mut low_pts: Vec<Point> = Vec::new();
+                let mut high_pts: Vec<Point> = Vec::new();
+                let low_slc = grid.slice_axis(ndarray::Axis(grid_axes[ax]), ndarray::Slice::from(0..1));
+                let high_slc = grid.slice_axis(ndarray::Axis(grid_axes[ax]), ndarray::Slice::from(-1..-2));
+                // TODO: Determine a way to better handle corners and edges where
+                // boundaries meet.
+                for pt in low_slc.iter() { low_pts.push(pt.clone()); }
+                for pt in high_slc.iter() { high_pts.push(pt.clone()); }
+                boundary_pts.insert(*ax, BoundaryPoints{low: low_pts, high: high_pts});
             }
+
             CartesianGridSpec {
+                axis_chars,
                 spacing,
                 gridshape,
+                grid_axes,
                 ndim: axes.len(),
                 coords,
                 grid: Grid(grid),
@@ -284,12 +322,14 @@ pub mod grid {
     /// struct would just contain a vector of GridScalars.
     pub trait GridQty<S> where S: GridSpec {
         /// Returns an Rc pointing to the GridSpec held by the GridQty.
-        fn get_spec(&self) -> Rc<S>;
+        fn spec(&self) -> Rc<S>;
         /// Returns a shared reference to the ValVector held by the GridQty.
-        fn get_gridvals(&self) -> &ValVector;
+        fn gridvals(&self) -> &ValVector;
+        /// Returns a mutable reference to the ValVector held by the GridQty.
+        fn gridvals_mut(&mut self) -> &mut ValVector;
         /// Returns a shared reference to the Grid struct on which the
         /// GridQty is defined.
-        fn get_grid(&self) -> &Grid;
+        fn grid(&self) -> &Grid;
         /// A public API that allows the creation of a new GridQty simply
         /// from its component parts (i.e., a GridSpec and a ValVector).
         /// Because ValVector has a very limited public API, this method
@@ -302,8 +342,6 @@ pub mod grid {
         fn new(spec: Rc<S>, gridvals: ValVector) -> Self;
     }
 
-    use std::rc::Rc;
-    
     /// The GridScalar struct is the type that represents the values of
     /// interest. It contains a GridSpec and a ValVector.
     #[derive(Clone, Debug, PartialEq)]
@@ -315,9 +353,10 @@ pub mod grid {
     }
 
     impl<S> GridQty<S> for GridScalar<S> where S: GridSpec {
-        fn get_spec(&self) -> Rc<S> { Rc::clone(&self.spec) }
-        fn get_gridvals(&self) -> &ValVector { &self.gridvals }
-        fn get_grid(&self) -> &Grid { self.spec.get_grid() }
+        fn spec(&self) -> Rc<S> { Rc::clone(&self.spec) }
+        fn gridvals(&self) -> &ValVector { &self.gridvals }
+        fn gridvals_mut(&mut self) -> &mut ValVector { &mut self.gridvals }
+        fn grid(&self) -> &Grid { self.spec.grid() }
         fn new(spec: Rc<S>, gridvals: ValVector) -> Self {
             Self::new(spec, gridvals)
         }
@@ -347,12 +386,12 @@ pub mod grid {
         /// let axs = vec![x, y];
         /// let spec = Rc::new(CartesianGridSpec::new(axs));
         /// let temperature = GridScalar::uniform(spec, 0.5);
-        /// assert_eq!(temperature.get_gridvals()[0], 0.5);
-        /// assert_eq!(temperature.get_gridvals().len(), 100*100);
+        /// assert_eq!(temperature.gridvals()[0], 0.5);
+        /// assert_eq!(temperature.gridvals().len(), 100*100);
         /// ```
         pub fn uniform(spec: Rc<S>, value: f64) -> Self {
             let mut n = 1;
-            for elm in spec.get_gridshape() {
+            for (_, elm) in spec.gridshape() {
                 n *= elm;
             }
             let gridvals: ndarray::Array1<f64> = ndarray::arr1(&vec![value; n][..]);
@@ -375,8 +414,8 @@ pub mod grid {
         /// let axs = vec![x, y];
         /// let spec = Rc::new(CartesianGridSpec::new(axs));
         /// let temperature = GridScalar::ones(spec);
-        /// assert_eq!(temperature.get_gridvals()[0], 1.);
-        /// assert_eq!(temperature.get_gridvals().len(), 100*100);
+        /// assert_eq!(temperature.gridvals()[0], 1.);
+        /// assert_eq!(temperature.gridvals().len(), 100*100);
         /// ```
         pub fn ones(spec: Rc<S>) -> Self {
             GridScalar::uniform(spec, 1.)
@@ -395,8 +434,8 @@ pub mod grid {
         /// let axs = vec![x, y];
         /// let spec = Rc::new(CartesianGridSpec::new(axs));
         /// let temperature = GridScalar::zeros(spec);
-        /// assert_eq!(temperature.get_gridvals()[0], 0.);
-        /// assert_eq!(temperature.get_gridvals().len(), 100*100);
+        /// assert_eq!(temperature.gridvals()[0], 0.);
+        /// assert_eq!(temperature.gridvals().len(), 100*100);
         /// ```
         pub fn zeros(spec: Rc<S>) -> Self {
             GridScalar::uniform(spec, 0.)
@@ -425,10 +464,10 @@ pub mod grid {
         /// assert_eq!(x_plus_temp, x_vals);
         /// assert_eq!(temp_minus_y, -&y_vals);
         /// ```
-        pub fn axis_vals(spec: Rc<S>, dimension: usize) -> Self {
+        pub fn axis_vals(spec: Rc<S>, axis_label: char) -> Self {
             let mut axis = GridScalar::zeros(Rc::clone(&spec));
-            let _ = spec.get_grid().iter().map(|point| {
-                axis.gridvals[point.idx] = point.coord[dimension];
+            let _ = spec.grid().iter().map(|point| {
+                axis.gridvals[point.idx] = point.coord[&axis_label];
             }).collect::<()>();
             axis
         }
@@ -439,7 +478,7 @@ pub mod grid {
 
         fn sub(self, other: &'b GridScalar<S>) -> Self::Output {
             if self.gridvals.len() == other.gridvals.len() &&
-            Rc::ptr_eq(&self.get_spec(), &other.get_spec()) {
+            Rc::ptr_eq(&self.spec(), &other.spec()) {
                 let result = self.gridvals.vals() - other.gridvals.vals();
                 GridScalar {
                     spec: Rc::clone(&self.spec),
@@ -481,7 +520,7 @@ pub mod grid {
 
         fn add(self, other: &'b GridScalar<S>) -> Self::Output {
             if self.gridvals.len() == other.gridvals.len() &&
-            Rc::ptr_eq(&self.get_spec(), &other.get_spec()) {
+            Rc::ptr_eq(&self.spec(), &other.spec()) {
                 let result = self.gridvals.vals() + other.gridvals.vals();
                 GridScalar {
                     spec: Rc::clone(&self.spec),
@@ -523,7 +562,7 @@ pub mod grid {
 
         fn mul(self, other: &'b GridScalar<S>) -> Self::Output {
             if self.gridvals.len() == other.gridvals.len() &&
-            Rc::ptr_eq(&self.get_spec(), &other.get_spec()) {
+            Rc::ptr_eq(&self.spec(), &other.spec()) {
                 let result = self.gridvals.vals() * other.gridvals.vals();
                 GridScalar {
                     spec: Rc::clone(&self.spec),
@@ -565,7 +604,7 @@ pub mod grid {
 
         fn div(self, other: &'b GridScalar<S>) -> Self::Output {
             if self.gridvals.len() == other.gridvals.len() &&
-            Rc::ptr_eq(&self.get_spec(), &other.get_spec()) {
+            Rc::ptr_eq(&self.spec(), &other.spec()) {
                 let result = self.gridvals.vals() / other.gridvals.vals();
                 GridScalar {
                     spec: Rc::clone(&self.spec),
@@ -612,6 +651,118 @@ pub mod grid {
             }
         }
     }
+
+    pub struct BoundaryHandler {
+        conditions: Vec<Box<dyn BoundaryCondition>>,
+    }
+    
+    impl BoundaryHandler {
+        pub fn new(conditions: Vec<Box<dyn BoundaryCondition>>) -> Self {
+            BoundaryHandler {
+                conditions
+            }
+        }
+        fn set_bound_vals<Q: GridQty<S>, S: GridSpec>(&self, time: f64, qty: &mut Q) {
+            let mut settable: Vec<(usize, f64)> = Vec::new();
+            for cndtn in self.conditions.iter() {
+                settable.append(&mut cndtn.generate_vals(time))
+            }
+            let mut used_indices: Vec<usize> = Vec::new();
+            for (idx, val) in settable.iter() {
+                if used_indices.contains(idx) {
+                    continue
+                }
+                qty.gridvals_mut()[*idx] = *val;
+                used_indices.push(*idx);
+            }
+        } // maybe call this set_BCs?
+        // fn check_bc_type(&self) -> String;
+    }
+
+    pub trait BoundaryCondition {
+        fn generate_vals(&self, time: f64) -> Vec<(usize, f64)>;
+    }
+
+    /// The DirichletConstant is a BoundaryCondition that is not dependent on
+    /// space or time.
+    pub struct DirichletConstant {
+        /// bc_list is a Vec that holds tuples containing the index of the
+        /// crate::grid::ValVector and the value to be set at that index.
+        bc_list: Vec<(usize, f64)>,
+    }
+
+    impl BoundaryCondition for DirichletConstant {
+        fn generate_vals(&self, _time: f64) -> Vec<(usize, f64)> { self.bc_list.clone() }
+    }
+
+    impl DirichletConstant {
+        /// Returns a new DirichletConstant instance based on the given value,
+        /// GridSpec, axis, and side arguments.
+        /// # Arguments
+        /// * `value` - The value to be set at the boundary
+        /// * `spec` - Reference to a GridSpec object
+        /// * `axis` - The character that labels which axis will have its boundary set
+        /// * `side` - The side of the given axis to be set to the given value
+        pub fn new<S: GridSpec>(value: f64, spec: &S, axis: char, side: BoundarySide) -> Self {
+            let mut bc_list = Vec::new();
+            for pt in spec.bound_pts(axis, side).iter() {
+                bc_list.push((pt.idx, value));
+            }
+
+            DirichletConstant {
+                bc_list,
+            }
+        }
+    }
+
+    /// The DirichletFunction is a boundary condition that may depend on space and time
+    /// through a function pointer held by the object.
+    pub struct DirichletFunction {
+        fnctn: fn(time: f64, pt: &Point) -> f64,
+        pts: Vec<Point>,
+    }
+
+    impl BoundaryCondition for DirichletFunction {
+        fn generate_vals(&self, time: f64) -> Vec<(usize, f64)> {
+            let mut output = Vec::new();
+            for pt in self.pts.iter() {
+                output.push((pt.idx, (self.fnctn)(time, pt)));
+            }
+
+            output
+        }
+    }
+
+    impl DirichletFunction {
+        /// Returns a new DirichletFunction instance based on the given function,
+        /// GridSpec, axis, and side arguments.
+        /// # Arguments
+        /// * `fnctn` - The function that evaluates to the value at the boundary
+        /// * `spec` - Reference to a GridSpec object
+        /// * `axis` - The character that labels which axis will have its boundary set
+        /// * `side` - The side of the given axis to be set with the given function
+        pub fn new<S: GridSpec>(fnctn: fn(time: f64, pt: &Point)->f64, spec: &S, axis: char, side: BoundarySide) -> Self {
+            DirichletFunction {
+                fnctn,
+                pts: spec.bound_pts(axis, side).clone(),
+            }
+        }
+    }
+
+    pub struct DirichletConstantVector {
+        prev_val: Option<f64>,
+        remaining: Option<Vec<f64>>,
+        pts: Vec<Point>,
+    }
+
+    /*
+    // To be implemented at later date:
+    pub struct DirichletFunctionVector {
+        prev_fnctn: Option<fn(time: f64) -> f64>,
+        remaining: Option<Vec<fn(time: f64) -> f64>>,
+        pts: Vec<crate::grid::Point>,
+    }
+    */
 }
 
 pub mod stencil {
@@ -656,7 +807,7 @@ pub mod stencil {
         /// let s = [-2,-1,0,1,2];
         /// let d1 = FdWeights::new(&s[..], 1);
         /// let d3 = FdWeights::new(&s[..], 3);
-        /// assert_eq!(d1.get_slots(), d3.get_slots());
+        /// assert_eq!(d1.slots(), d3.slots());
         /// ```
         /// 
         /// ```should_panic
@@ -670,8 +821,8 @@ pub mod stencil {
         /// use rustencils::stencil::FdWeights;
         /// let s = [3,1,0,1,-1,-2,3];
         /// let d2 = FdWeights::new(&s[..], 2);
-        /// assert_ne!(d2.get_slots(), &s[..]);
-        /// assert_eq!(d2.get_slots(), &[-2,-1,0,1,3]);
+        /// assert_ne!(d2.slots(), &s[..]);
+        /// assert_eq!(d2.slots(), &[-2,-1,0,1,3]);
         /// ```
         /// 
         /// ```
@@ -679,8 +830,8 @@ pub mod stencil {
         /// let s = [-1,0,1];
         /// let d1 = FdWeights::new(&s[..], 1);
         /// let d2 = FdWeights::new(&s[..], 2);
-        /// assert_eq!(d1.get_weights()[0], -0.5);
-        /// assert_eq!(d2.get_weights()[0], 1.);
+        /// assert_eq!(d1.weights()[0], -0.5);
+        /// assert_eq!(d2.weights()[0], 1.);
         /// ```
         pub fn new(slots: &[isize], nderiv: usize) -> Self {
             let stncl = Stencil::new(slots);
@@ -719,18 +870,18 @@ pub mod stencil {
 
         /// Returns a shared array slice containing the stencil point
         /// positions.
-        pub fn get_slots(&self) -> &[isize] {
-            &self.stencil.get_slots()
+        pub fn slots(&self) -> &[isize] {
+            &self.stencil.slots()
         }
 
         /// Returns the value of the derivative order
-        pub fn get_ord(&self) -> usize {
+        pub fn ord(&self) -> usize {
             self.nderiv
         }
 
         /// Returns a shared reference to a rustencils::grid::ValVector
         /// that contains the calculated finite difference coefficients
-        pub fn get_weights(&self) -> &crate::grid::ValVector {
+        pub fn weights(&self) -> &crate::grid::ValVector {
             &self.weights
         }
     }
@@ -765,7 +916,7 @@ pub mod stencil {
 
         /// Returns a shared array slice containing the stencil point
         /// positions.
-        fn get_slots(&self) -> &[isize] {
+        fn slots(&self) -> &[isize] {
             &self.slot_pos[..]
         }
     }
@@ -774,8 +925,8 @@ pub mod stencil {
     fn check_slots() {
         let slots = [3,1,0,1,-1,-2,3];
         let stncl = Stencil::new(&slots[..]);
-        assert_ne!(stncl.get_slots(), &slots[..]);
-        assert_eq!(stncl.get_slots(), &[-2,-1,0,1,3]);
+        assert_ne!(stncl.slots(), &slots[..]);
+        assert_eq!(stncl.slots(), &[-2,-1,0,1,3]);
     }
 }
 
@@ -797,9 +948,9 @@ pub mod operator {
         /// finite difference coefficients used at the edges of the grid
         /// where the interior stencil will not fit
         edge: E,
-        /// Axis with respect to which the derivative will be taken (e.g.,
-        /// 0 -> d/dx, 1 -> d/dy, etc.)
-        basis_direction: usize,
+        /// Axis with respect to which the derivative will be taken. Must
+        /// match the character used to construct the axis.
+        basis_direction: char,
         /// The order of the derivative
         deriv_ord: usize,
     }
@@ -871,25 +1022,25 @@ pub mod operator {
         /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
         /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
         /// ```
-        pub fn new(interior: crate::stencil::FdWeights, edge: E, direction: usize) -> Self {
-            let deriv_ord = interior.get_ord();
-            for elm in edge.get_left() {
-                assert_eq!(deriv_ord, elm.get_ord());
+        pub fn new(interior: crate::stencil::FdWeights, edge: E, axis: char) -> Self {
+            let deriv_ord = interior.ord();
+            for elm in edge.left() {
+                assert_eq!(deriv_ord, elm.ord());
             }
-            for elm in edge.get_right() {
-                assert_eq!(deriv_ord, elm.get_ord());
+            for elm in edge.right() {
+                assert_eq!(deriv_ord, elm.ord());
             }
             let _ = edge.check_edges(&interior);
             Operator1D {
                 interior,
                 edge,
-                basis_direction: direction,
+                basis_direction: axis,
                 deriv_ord,
             }
         }
 
         /// Retruns the order of the derivative
-        pub fn get_ord(&self) -> usize {
+        pub fn ord(&self) -> usize {
             self.deriv_ord
         }
     }
@@ -926,14 +1077,14 @@ pub mod operator {
         fn check_right_edge(&self, weights_int: &crate::stencil::FdWeights);
         /// Returns an exclusive reference to the vector of left edge
         /// FdWeights
-        fn get_left_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights>;
+        fn left_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights>;
         /// Returns an exclusive reference to the vector of right edge
         /// FdWeights
-        fn get_right_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights>;
+        fn right_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights>;
         /// Returns a shared reference to the vector of left edge FdWeights
-        fn get_left(&self) -> &Vec<crate::stencil::FdWeights>;
+        fn left(&self) -> &Vec<crate::stencil::FdWeights>;
         /// Returns a shared reference to the vector of right edge FdWeights
-        fn get_right(&self) -> &Vec<crate::stencil::FdWeights>;
+        fn right(&self) -> &Vec<crate::stencil::FdWeights>;
     }
 
     /// The FixedEdgeOperator struct contains vectors of rustencils::stencil::FdWeights.
@@ -957,12 +1108,12 @@ pub mod operator {
 
     impl EdgeOperator for FixedEdgeOperator {
         fn check_edges(&self, weights_int: &crate::stencil::FdWeights) -> Result<(), &'static str> {
-            match weights_int.get_slots().iter().min() {
+            match weights_int.slots().iter().min() {
                 Some(x) if x < &0 => self.check_left_edge(weights_int),
                 Some(_) => {},
                 None => {}
             }
-            match weights_int.get_slots().iter().max() {
+            match weights_int.slots().iter().max() {
                 Some(x) if x > &0 => self.check_right_edge(weights_int),
                 Some(_) => {},
                 None => {}
@@ -971,23 +1122,23 @@ pub mod operator {
         }
 
         fn check_left_edge(&self, weights_int: &crate::stencil::FdWeights) {
-            assert_eq!(weights_int.get_slots().iter().min().unwrap(), &-(self.left.len() as isize), "Improper number of left edge stencils!");
+            assert_eq!(weights_int.slots().iter().min().unwrap(), &-(self.left.len() as isize), "Improper number of left edge stencils!");
             for (n, item) in self.left.iter().enumerate() {
-                assert!(item.get_slots().iter().min().unwrap() >= &(0-(n as isize)), "Edge stencil out of range!");
+                assert!(item.slots().iter().min().unwrap() >= &(0-(n as isize)), "Edge stencil out of range!");
             }
         }
 
         fn check_right_edge(&self, weights_int: &crate::stencil::FdWeights) {
-            assert_eq!(weights_int.get_slots().iter().max().unwrap(), &(self.right.len() as isize), "Improper number of right edge stencils!");
+            assert_eq!(weights_int.slots().iter().max().unwrap(), &(self.right.len() as isize), "Improper number of right edge stencils!");
             for (n, item) in self.right.iter().enumerate() {
-                assert!(item.get_slots().iter().max().unwrap() <= &(n as isize), "Edge stencil out of range!");
+                assert!(item.slots().iter().max().unwrap() <= &(n as isize), "Edge stencil out of range!");
             }
         }
 
-        fn get_left_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights> { &mut self.left }
-        fn get_right_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights> { &mut self.right }
-        fn get_left(&self) -> &Vec<crate::stencil::FdWeights> { &self.left }
-        fn get_right(&self) -> &Vec<crate::stencil::FdWeights> { &self.right }
+        fn left_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights> { &mut self.left }
+        fn right_mut(&mut self) -> &mut Vec<crate::stencil::FdWeights> { &mut self.right }
+        fn left(&self) -> &Vec<crate::stencil::FdWeights> { &self.left }
+        fn right(&self) -> &Vec<crate::stencil::FdWeights> { &self.right }
     }
 
     impl FixedEdgeOperator {
@@ -1091,9 +1242,9 @@ pub mod operator {
         /// ```
         pub fn of_qty<Q, S>(&self, qty: &Q) -> Q
         where Q: GridQty<S>, S: GridSpec {
-            assert_eq!(qty.get_gridvals().len(), self.shape.0);
-            let result = self.matrix.dot(qty.get_gridvals().as_ndarray());
-            GridQty::new(qty.get_spec(), crate::grid::ValVector(result))
+            assert_eq!(qty.gridvals().len(), self.shape.0);
+            let result = self.matrix.dot(qty.gridvals().as_ndarray());
+            GridQty::new(qty.spec(), crate::grid::ValVector(result))
         }
 
         /// Returns a new OperatorMatrix that is the result of taking the
@@ -1208,31 +1359,31 @@ pub mod operator {
     pub fn construct_op<Q, S, E>(op1d: Operator1D<E>, qty: &Q) -> OperatorMatrix
     where Q: GridQty<S>, S: GridSpec, E: EdgeOperator
     {
-        let dim_num = op1d.basis_direction;
-        let dim_pts = qty.get_spec().get_gridshape()[dim_num];
-        let tot_pts = qty.get_gridvals().len();
+        let dim = op1d.basis_direction;
+        let dim_pts = qty.spec().gridshape()[&dim];
+        let tot_pts = qty.gridvals().len();
         let shape = (tot_pts, tot_pts);
-        let deriv_ord = op1d.get_ord();
-        let denom = (qty.get_spec().get_spacing()[dim_num]).powi(deriv_ord as i32);
+        let deriv_ord = op1d.ord();
+        let denom = (qty.spec().spacing()[&dim]).powi(deriv_ord as i32);
         let mut matrix: ndarray::Array2<f64> = ndarray::Array2::zeros(shape);
-        for (idxs, pt) in qty.get_grid().indexed_iter() {
-            let left_idx = idxs[dim_num];
-            let right_idx = dim_pts - idxs[dim_num] - 1;
+        for (idxs, pt) in qty.grid().indexed_iter() {
+            let left_idx = idxs[qty.spec().grid_axes()[&dim]];
+            let right_idx = dim_pts - idxs[qty.spec().grid_axes()[&dim]] - 1;
             
             let (stncl, weights) = match (left_idx, right_idx) {
-                (left_idx, right_idx) if left_idx >= op1d.edge.get_left().len() && right_idx >= op1d.edge.get_right().len()
-                            => (op1d.interior.get_slots(), op1d.interior.get_weights()),
-                (left_idx, _) if left_idx < op1d.edge.get_left().len()
-                            => (op1d.edge.get_left()[left_idx].get_slots(), op1d.edge.get_left()[left_idx].get_weights()),
-                (_, right_idx) if right_idx < op1d.edge.get_right().len()
-                            => (op1d.edge.get_right()[right_idx].get_slots(), op1d.edge.get_right()[right_idx].get_weights()),
+                (left_idx, right_idx) if left_idx >= op1d.edge.left().len() && right_idx >= op1d.edge.right().len()
+                            => (op1d.interior.slots(), op1d.interior.weights()),
+                (left_idx, _) if left_idx < op1d.edge.left().len()
+                            => (op1d.edge.left()[left_idx].slots(), op1d.edge.left()[left_idx].weights()),
+                (_, right_idx) if right_idx < op1d.edge.right().len()
+                            => (op1d.edge.right()[right_idx].slots(), op1d.edge.right()[right_idx].weights()),
                 (_, _) => panic!("Error while constructing operator!"),
             };
 
             let _ = stncl.iter().enumerate().map(|(i, rel_pos)| {
                 let mut new_idxs = idxs.clone();
-                new_idxs[dim_num] = (new_idxs[dim_num] as isize + rel_pos) as usize;
-                let mtx_col_idx = qty.get_grid()[new_idxs].idx;
+                new_idxs[qty.spec().grid_axes()[&dim]] = (new_idxs[qty.spec().grid_axes()[&dim]] as isize + rel_pos) as usize;
+                let mtx_col_idx = qty.grid()[new_idxs].idx;
                 matrix[[pt.idx, mtx_col_idx]] = weights[i]/denom;
             }).collect::<()>();
         }
@@ -1274,29 +1425,6 @@ pub mod operator {
     }
 }
 
-pub mod boundaries {
-    pub trait BoundaryHandler {
-        fn set_bounds(); // maybe call this set_BCs?
-        fn check_bc_type();
-    }
-
-    pub trait BoundaryCondition {
-        fn print_bc(); // print the conatained BC
-        fn get_boundary(); // return the slice of the grid corresponding to this boundary
-        fn get_bc_type();
-    }
-
-    pub enum BoundarySide {
-        Low,
-        High,
-    }
-
-    pub struct DirichletHandler<T> {
-        bc_type: String,
-        bc_list: Vec<T>,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1305,3 +1433,61 @@ mod tests {
         assert_eq!(2 + 2, 4);
     }
 }
+
+/*
+How will setting boundaries work?
+Want some outer object on which to simply call:
+
+_outer_obj.set_bounds(_grid_qty);
+
+So outer object must already know what the conditions are for each axis.
+
+Alternatively, there could be a boundary driver that takes both the grid
+qty and a vector of boundary conditions and just iterates over the vector,
+setting each boundary as it goes. The driver could be an object or
+standalone function.
+
+For a Dirichlet BC, there are predicted to be four general cases that
+will require specialized implementations:
+1. The value at every boundary point is fixed at one constant value
+    independent of the timestep (may still depend on position).
+2. The value at every boundary point is dependent on the timestep
+    in a "random" way (i.e., the dependence can't be expressed as
+    a function). The values may of course also depend on position.
+    This may actually be difficult since there may not be a good way
+    to associate a Vec of values with a specific timestep. Could
+    simply have a Vec<Vec<(idx: usize, value: f64)>> that is slowly
+    consumed over the course of the simulation.
+3. The value at every boundary point is dependent on the timestep
+    (and position) in a way that can be expressed as a mathematical
+    function, which itself does not depend on the timestep.
+4. (Is this possible?) The value at every boundary point is dependent
+    on the timestep (and position) in a way that can be expressed as
+    a mathematical function, which itself DOES depend on the timestep.
+
+Maybe each boundary condition needs a method to generate the boundary
+values in some standardized way (e.g. Vec<(idx: usize, value: f64)>).
+
+In realtiy, due to the inability to know how the grid will be constructed
+at compile time, the dependence of the boundary value on position must be
+an analytical expression to be computed at run time. This combined with
+the complexity of comparing/hashing floating point values means that the
+only options which are straightforward to implement are the following:
+1. The value at the boundary is constant with respect to space and time.
+2. The value at the boundary is an analytical function f(t, x0,...,xn).
+    This function may be piece-wise since ordering of floating point
+    values is allowed.
+3. The value at the boundary is constant with respect to space, and the
+    user assumes responsibility for the time dependence by passing in a
+    Vec of values that are consumed one at a time at each timestep.
+4. The value at the boundary is an analytical function g(t, x0,...,xn) which
+    may be piece-wise, and the user assumes responsibility for the time
+    dependence by passing in a Vec of functions (or function pointers?)
+    that are consumed one at a time at each timestep.
+
+Therefore, perhaps the most logical construction is for a boundary driver
+object to hold a vector of objects that each implement a BoundaryCondition
+trait that only has one method which is called to generate the vector of
+boundary values. Then the driver can iterate over the values and set them
+in the grid qty as it goes.
+*/
