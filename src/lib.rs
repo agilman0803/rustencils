@@ -248,13 +248,18 @@ pub mod grid {
         /// * `axes` - vector containing one or more instances of AxisSetup
         /// # Examples
         /// ```
+        /// use std::collections::HashMap;
         /// use rustencils::grid::{AxisSetup, GridSpec, CartesianGridSpec};
         /// let x = AxisSetup::new(0., 0.01, 100);
         /// let y = x.clone();
-        /// let axs = vec![x, y];
+        /// let mut axs = HashMap::new();
+        /// axs.insert('x', x);
+        /// axs.insert('y', y);
         /// let spec = CartesianGridSpec::new(axs);
-        /// assert_eq!(spec.gridshape(), &vec![100,100]);
-        /// assert_eq!(spec.spacing(), &vec![0.01,0.01]);
+        /// assert_eq!(spec.gridshape()[&'x'], 100);
+        /// assert_eq!(spec.gridshape()[&'y'], 100);
+        /// assert_eq!(spec.spacing()[&'x'], 0.01);
+        /// assert_eq!(spec.spacing()[&'y'], 0.01);
         /// ```
         pub fn new(axes: HashMap<char, AxisSetup>) -> Self {
             let axis_chars: Vec<char> = axes.iter().map(|(label, _)| *label).collect();
@@ -380,10 +385,13 @@ pub mod grid {
         /// # Examples
         /// ```
         /// use std::rc::Rc;
+        /// use std::collections::HashMap;
         /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
         /// let x = AxisSetup::new(0., 0.01, 100);
         /// let y = x.clone();
-        /// let axs = vec![x, y];
+        /// let mut axs = HashMap::new();
+        /// axs.insert('x', x);
+        /// axs.insert('y', y);
         /// let spec = Rc::new(CartesianGridSpec::new(axs));
         /// let temperature = GridScalar::uniform(spec, 0.5);
         /// assert_eq!(temperature.gridvals()[0], 0.5);
@@ -408,10 +416,13 @@ pub mod grid {
         /// # Examples
         /// ```
         /// use std::rc::Rc;
+        /// use std::collections::HashMap;
         /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
         /// let x = AxisSetup::new(0., 0.01, 100);
         /// let y = x.clone();
-        /// let axs = vec![x, y];
+        /// let mut axs = HashMap::new();
+        /// axs.insert('x', x);
+        /// axs.insert('y', y);
         /// let spec = Rc::new(CartesianGridSpec::new(axs));
         /// let temperature = GridScalar::ones(spec);
         /// assert_eq!(temperature.gridvals()[0], 1.);
@@ -428,10 +439,13 @@ pub mod grid {
         /// # Examples
         /// ```
         /// use std::rc::Rc;
+        /// use std::collections::HashMap;
         /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
         /// let x = AxisSetup::new(0., 0.01, 100);
         /// let y = x.clone();
-        /// let axs = vec![x, y];
+        /// let mut axs = HashMap::new();
+        /// axs.insert('x', x);
+        /// axs.insert('y', y);
         /// let spec = Rc::new(CartesianGridSpec::new(axs));
         /// let temperature = GridScalar::zeros(spec);
         /// assert_eq!(temperature.gridvals()[0], 0.);
@@ -451,14 +465,17 @@ pub mod grid {
         /// # Examples
         /// ```
         /// use std::rc::Rc;
+        /// use std::collections::HashMap;
         /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
         /// let x_init = AxisSetup::new(0., 0.01, 100);
         /// let y_init = x_init.clone();
-        /// let axs_init = vec![x_init, y_init];
+        /// let mut axs_init = HashMap::new();
+        /// axs_init.insert('x', x_init);
+        /// axs_init.insert('y', y_init);
         /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
         /// let temperature = GridScalar::zeros(Rc::clone(&spec));
-        /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 0);
-        /// let y_vals = GridScalar::axis_vals(spec, 1);
+        /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 'x');
+        /// let y_vals = GridScalar::axis_vals(spec, 'y');
         /// let x_plus_temp = &x_vals + &temperature;
         /// let temp_minus_y = &temperature - &y_vals;
         /// assert_eq!(x_plus_temp, x_vals);
@@ -652,20 +669,50 @@ pub mod grid {
         }
     }
 
+    /// The BoundaryHandler struct simply holds a vector of BoundaryConditions
+    /// and is responsible for setting the boundary points to the appropriate
+    /// values.
     pub struct BoundaryHandler {
         conditions: Vec<Box<dyn BoundaryCondition>>,
     }
     
     impl BoundaryHandler {
+        /// Constructs a new BoundaryHandler instance
+        /// # Arguments
+        /// * `conditions` - Vector of BoundaryConditions for the current system
         pub fn new(conditions: Vec<Box<dyn BoundaryCondition>>) -> Self {
             BoundaryHandler {
                 conditions
             }
         }
-        fn set_bound_vals<Q: GridQty<S>, S: GridSpec>(&self, time: f64, qty: &mut Q) {
+
+        /// Sets the boundary points to the appropriate values by iterating
+        /// through the boundary conditions.
+        /// # Arguments
+        /// * `time` - The value of the current timestep
+        /// * `qty` - Exclusive reference to the GridQty that will have its values modified
+        /// # Examples
+        /// ```
+        /// use std::rc::Rc;
+        /// use std::collections::HashMap;
+        /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+        /// use rustencils::grid::{BoundarySide, BoundaryHandler, BoundaryCondition, DirichletConstant};
+        /// let x_init = AxisSetup::new(0., 0.01, 100);
+        /// let y_init = x_init.clone();
+        /// let mut axs_init = HashMap::new();
+        /// axs_init.insert('x', x_init);
+        /// axs_init.insert('y', y_init);
+        /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
+        /// let dir_bc = Box::new(DirichletConstant::new(1., &*spec, 'x', BoundarySide::Low));
+        /// let mut bcs = BoundaryHandler::new(vec![dir_bc]);
+        /// let mut temperature = GridScalar::zeros(spec);
+        /// bcs.set_bound_vals(0., &mut temperature);
+        /// ```
+        /// TODO: Improve testing of this method.
+        pub fn set_bound_vals<Q: GridQty<S>, S: GridSpec>(&mut self, time: f64, qty: &mut Q) {
             let mut settable: Vec<(usize, f64)> = Vec::new();
-            for cndtn in self.conditions.iter() {
-                settable.append(&mut cndtn.generate_vals(time))
+            for cndtn in self.conditions.iter_mut() {
+                settable.append(&mut cndtn.generate_vals(time));
             }
             let mut used_indices: Vec<usize> = Vec::new();
             for (idx, val) in settable.iter() {
@@ -680,7 +727,7 @@ pub mod grid {
     }
 
     pub trait BoundaryCondition {
-        fn generate_vals(&self, time: f64) -> Vec<(usize, f64)>;
+        fn generate_vals(&mut self, time: f64) -> Vec<(usize, f64)>;
     }
 
     /// The DirichletConstant is a BoundaryCondition that is not dependent on
@@ -692,7 +739,7 @@ pub mod grid {
     }
 
     impl BoundaryCondition for DirichletConstant {
-        fn generate_vals(&self, _time: f64) -> Vec<(usize, f64)> { self.bc_list.clone() }
+        fn generate_vals(&mut self, _time: f64) -> Vec<(usize, f64)> { self.bc_list.clone() }
     }
 
     impl DirichletConstant {
@@ -718,12 +765,12 @@ pub mod grid {
     /// The DirichletFunction is a boundary condition that may depend on space and time
     /// through a function pointer held by the object.
     pub struct DirichletFunction {
-        fnctn: fn(time: f64, pt: &Point) -> f64,
+        fnctn: Box<dyn Fn(f64, &Point) -> f64>,
         pts: Vec<Point>,
     }
 
     impl BoundaryCondition for DirichletFunction {
-        fn generate_vals(&self, time: f64) -> Vec<(usize, f64)> {
+        fn generate_vals(&mut self, time: f64) -> Vec<(usize, f64)> {
             let mut output = Vec::new();
             for pt in self.pts.iter() {
                 output.push((pt.idx, (self.fnctn)(time, pt)));
@@ -741,7 +788,13 @@ pub mod grid {
         /// * `spec` - Reference to a GridSpec object
         /// * `axis` - The character that labels which axis will have its boundary set
         /// * `side` - The side of the given axis to be set with the given function
-        pub fn new<S: GridSpec>(fnctn: fn(time: f64, pt: &Point)->f64, spec: &S, axis: char, side: BoundarySide) -> Self {
+        pub fn new<S>(
+            fnctn: Box<dyn Fn(f64, &Point) -> f64>, 
+            spec: &S, 
+            axis: char, 
+            side: BoundarySide
+        ) -> Self 
+            where S: GridSpec {
             DirichletFunction {
                 fnctn,
                 pts: spec.bound_pts(axis, side).clone(),
@@ -750,9 +803,80 @@ pub mod grid {
     }
 
     pub struct DirichletConstantVector {
-        prev_val: Option<f64>,
-        remaining: Option<Vec<f64>>,
+        prev_val: Option<Vec<(usize, f64)>>,
+        remaining: Vec<f64>,
         pts: Vec<Point>,
+    }
+
+    impl BoundaryCondition for DirichletConstantVector {
+        fn generate_vals(&mut self, _time: f64) -> Vec<(usize, f64)> {
+            if self.remaining.is_empty() {
+                if let Some(prev) = &self.prev_val {
+                    return prev.clone()
+                }
+            }
+            let val = self.remaining.remove(0);
+            let mut output = Vec::new();
+            for pt in self.pts.iter() {
+                output.push((pt.idx, val))
+            }
+            if self.remaining.is_empty() {
+                self.prev_val = Some(output.clone())
+            }
+
+            output
+        }
+    }
+
+    impl DirichletConstantVector {
+        /// Returns a new DirichletConstantVector instance based on the given values,
+        /// GridSpec, axis, and side arguments.
+        /// # Arguments
+        /// * `values` - The vector of value to be set at the boundary
+        /// * `spec` - Reference to a GridSpec object
+        /// * `axis` - The character that labels which axis will have its boundary set
+        /// * `side` - The side of the given axis to be set to the given value
+        pub fn new<S: GridSpec>(values: Vec<f64>, spec: &S, axis: char, side: BoundarySide) -> Self {
+            DirichletConstantVector {
+                prev_val: None,
+                remaining: values,
+                pts: spec.bound_pts(axis, side).clone(),
+            }
+        }
+
+        /// Returns a new DirichletConstantVector instance based on the given time,
+        /// function, GridSpec, axis, and side arguments.
+        /// # Arguments
+        /// * `tstart` - The first time point of the
+        /// * `timestep` - The amount by which to increment the time
+        /// * `nsteps` - The number of time steps
+        /// * `fnctn` - The function that evaluates to the boundary values
+        /// * `spec` - Reference to a GridSpec object
+        /// * `axis` - The character that labels which axis will have its boundary set
+        /// * `side` - The side of the given axis to be set to the given value
+        pub fn from_function<S, F>(
+            tstart: f64, 
+            timestep: f64, 
+            nsteps: usize, 
+            fnctn: F, 
+            spec: &S, 
+            axis: char, 
+            side: BoundarySide
+        ) -> Self
+            where
+                S: GridSpec,
+                F: Fn(f64) -> f64 {
+            let mut values = Vec::new();
+            for i in 0..nsteps {
+                values.push(fnctn(tstart + timestep*(i as f64)));
+            }
+
+            DirichletConstantVector {
+                prev_val: None,
+                remaining: values,
+                pts: spec.bound_pts(axis, side).clone()
+            }
+        }
     }
 
     /*
@@ -970,6 +1094,7 @@ pub mod operator {
         /// # Examples
         /// ```
         /// use std::rc::Rc;
+        /// use std::collections::HashMap;
         /// use rustencils::stencil::FdWeights;
         /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
         /// use rustencils::operator::{Operator1D, FixedEdgeOperator};
@@ -977,7 +1102,9 @@ pub mod operator {
         /// // First initialize the grid objects
         /// let x_init = AxisSetup::new(0., 0.01, 100);
         /// let y_init = x_init.clone();
-        /// let axs_init = vec![x_init, y_init];
+        /// let mut axs_init = HashMap::new();
+        /// axs_init.insert('x', x_init);
+        /// axs_init.insert('y', y_init);
         /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
         /// let temperature = GridScalar::zeros(Rc::clone(&spec));
         /// 
@@ -995,8 +1122,8 @@ pub mod operator {
         /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
         /// 
         /// // Next construct the full Operator1D instances
-        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
-        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 'x');
+        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 'y');
         /// ```
         /// 
         /// ```should_panic
@@ -1019,8 +1146,8 @@ pub mod operator {
         /// // Panics because the right edge does not have enough FdWeights!
         /// // Remember that each FdWeights in the edge is only applied once
         /// // and they are applied from the outside of the grid to the interior
-        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
-        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 'x');
+        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 'y');
         /// ```
         pub fn new(interior: crate::stencil::FdWeights, edge: E, axis: char) -> Self {
             let deriv_ord = interior.ord();
@@ -1196,6 +1323,7 @@ pub mod operator {
         /// # Examples
         /// ```
         /// use std::rc::Rc;
+        /// use std::collections::HashMap;
         /// use rustencils::stencil::FdWeights;
         /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
         /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
@@ -1204,10 +1332,12 @@ pub mod operator {
         /// // First initialize the grid objects
         /// let x_init = AxisSetup::new(0., 0.01, 100);
         /// let y_init = x_init.clone();
-        /// let axs_init = vec![x_init, y_init];
+        /// let mut axs_init = HashMap::new();
+        /// axs_init.insert('x', x_init);
+        /// axs_init.insert('y', y_init);
         /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
-        /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 0);
-        /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 1);
+        /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 'x');
+        /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 'y');
         /// // T will represent temperature
         /// let T = 100. * &( &( &x_vals * &x_vals) * &( &y_vals * &y_vals) );
         /// 
@@ -1225,8 +1355,8 @@ pub mod operator {
         /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
         /// 
         /// // Next construct the full Operator1D instances
-        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
-        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 'x');
+        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 'y');
         /// 
         /// // Construct OperatorMatrix instances
         /// let d2dx2 = construct_op(op1d_2nd_x, &T);
@@ -1255,6 +1385,7 @@ pub mod operator {
         /// # Examples
         /// ```
         /// use std::rc::Rc;
+        /// use std::collections::HashMap;
         /// use rustencils::stencil::FdWeights;
         /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
         /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
@@ -1263,10 +1394,12 @@ pub mod operator {
         /// // First initialize the grid objects
         /// let x_init = AxisSetup::new(0., 0.01, 100);
         /// let y_init = x_init.clone();
-        /// let axs_init = vec![x_init, y_init];
+        /// let mut axs_init = HashMap::new();
+        /// axs_init.insert('x', x_init);
+        /// axs_init.insert('y', y_init);
         /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
-        /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 0);
-        /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 1);
+        /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 'x');
+        /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 'y');
         /// // T will represent temperature
         /// let T = 100. * &( &( &x_vals * &x_vals) * &( &y_vals * &y_vals) );
         /// 
@@ -1284,8 +1417,8 @@ pub mod operator {
         /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
         /// 
         /// // Next construct the full Operator1D instances
-        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
-        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+        /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 'x');
+        /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 'y');
         /// 
         /// // Construct OperatorMatrix instances
         /// let d2dx2 = construct_op(op1d_2nd_x, &T);
@@ -1320,6 +1453,7 @@ pub mod operator {
     /// # Examples
     /// ```
     /// use std::rc::Rc;
+    /// use std::collections::HashMap;
     /// use rustencils::stencil::FdWeights;
     /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
     /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
@@ -1328,10 +1462,12 @@ pub mod operator {
     /// // First initialize the grid objects
     /// let x_init = AxisSetup::new(0., 0.01, 100);
     /// let y_init = x_init.clone();
-    /// let axs_init = vec![x_init, y_init];
+    /// let mut axs_init = HashMap::new();
+    /// axs_init.insert('x', x_init);
+    /// axs_init.insert('y', y_init);
     /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
-    /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 0);
-    /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 1);
+    /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 'x');
+    /// let y_vals = GridScalar::axis_vals(Rc::clone(&spec), 'y');
     /// // T will represent temperature
     /// let T = 100. * &( &( &x_vals * &x_vals) * &( &y_vals * &y_vals) );
     /// 
@@ -1349,8 +1485,8 @@ pub mod operator {
     /// let edge_wts_2nd = FixedEdgeOperator::new(wts_2nd_L, wts_2nd_R);
     /// 
     /// // Next construct the full Operator1D instances
-    /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 0);
-    /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 1);
+    /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 'x');
+    /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 'y');
     /// 
     /// // Construct OperatorMatrix instances
     /// let d2dx2 = construct_op(op1d_2nd_x, &T);
