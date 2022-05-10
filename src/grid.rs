@@ -52,6 +52,44 @@ impl ValVector {
     pub(crate) fn as_ndarray(&self) -> &ndarray::Array1<f64> {
         self.vals()
     }
+
+    /// Returns a GridScalar instance that contains the values along the
+    /// specified coordinate axis that correspond to the indices of the
+    /// GridScalar. Use this if you need to add/multiply/etc. the value
+    /// of interest by the axis coordinate (e.g., x*dT/dx, or y+T).
+    /// # Arguments
+    /// * `spec` - reference counted smart pointer to a GridSpec
+    /// * `dimension` - the axis for which the values are desired
+    /// # Examples
+    /// ```
+    /// use std::rc::Rc;
+    /// use std::collections::HashMap;
+    /// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
+    /// let x_init = AxisSetup::new(0., 0.01, 100);
+    /// let y_init = x_init.clone();
+    /// let mut axs_init = HashMap::new();
+    /// axs_init.insert('x', x_init);
+    /// axs_init.insert('y', y_init);
+    /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
+    /// let temperature = GridScalar::zeros(Rc::clone(&spec));
+    /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 'x');
+    /// let y_vals = GridScalar::axis_vals(spec, 'y');
+    /// let x_plus_temp = &x_vals + &temperature;
+    /// let temp_minus_y = &temperature - &y_vals;
+    /// assert_eq!(x_plus_temp, x_vals);
+    /// assert_eq!(temp_minus_y, -&y_vals);
+    /// ```
+    pub fn axis_vals<S: GridSpec>(spec: &S, axis_label: char) -> Self {
+        let mut n = 1;
+        for (_, elm) in spec.gridshape() {
+            n *= elm;
+        }
+        let mut axis: ndarray::Array1<f64> = ndarray::arr1(&vec![0.; n][..]);
+        let _ = spec.grid().iter().map(|point| {
+            axis[point.idx] = point.coord[&axis_label];
+        }).collect::<()>();
+        ValVector(axis)
+    }
 }
 
 impl core::ops::Index<usize> for ValVector {
@@ -68,16 +106,30 @@ impl core::ops::IndexMut<usize> for ValVector {
     }
 }
 
+pub struct GridSpace(HashMap<char, AxisSetup>);
+
+impl GridSpace {
+    pub fn new() -> Self {
+        GridSpace(HashMap::new())
+    }
+
+    pub fn add_axis(&mut self, label: char, start: f64, delta: f64, steps: usize, periodic: bool) {
+        let axis = AxisSetup::new(start, delta, steps, periodic);
+        self.0.insert(label, axis);
+    }
+}
+
 /// For consistency, this AxisSetup struct is used as an argument when
 /// constructing GridSpecs. It contains the minimum axis value
 /// (`start: f64`), the spacing of the axis points (`delta: f64`),
 /// and the number of axis points including the start value
 /// (`steps: usize`).
 #[derive(Clone)]
-pub struct AxisSetup {
+struct AxisSetup {
     start: f64,
     delta: f64,
     steps: usize,
+    periodic: bool,
 }
 
 impl AxisSetup {
@@ -101,7 +153,7 @@ impl AxisSetup {
     /// use rustencils::grid::AxisSetup;
     /// let ax = AxisSetup::new(0., 0.1, 100);
     /// ```
-    pub fn new(start: f64, delta: f64, steps: usize) -> Self {
+    fn new(start: f64, delta: f64, steps: usize, periodic: bool) -> Self {
         assert_ne!(delta, 0., "Delta cannot be zero!");
         assert_ne!(steps, 0, "Steps cannot be zero!");
         assert_ne!(steps, 1, "Steps cannot be one!");
@@ -109,6 +161,7 @@ impl AxisSetup {
             delta: delta.abs(),
             start,
             steps,
+            periodic,
         }
     }
 }
@@ -154,6 +207,12 @@ pub trait GridSpec {
     /// points refer to the outermost set of points along the edge of the
     /// grid.
     fn bound_pts(&self, axis: char, side: BoundarySide) -> &Vec<Point>;
+    /// Returns a shared reference to a Hashmap that signifies whether
+    /// each axis is periodic or not.
+    fn periodic_axs(&self) -> &HashMap<char, bool>;
+    /// Returns a shared reference to a vector of GridScalars.
+    fn scalars(&self) -> &HashMap<char, GridScalar>;
+    fn scalars_mut(&mut self) -> &mut HashMap<char, GridScalar>;
     /*
     /// Returns an owned vector of usizes that represent the index values
     /// of the boundary points along the specified axis. Here, the boundary
@@ -180,7 +239,6 @@ struct BoundaryPoints {
 /// Grid in Cartesian coordinates. The dimensionality can be any size,
 /// which means it could be more or less than the standard 3-dimensional
 /// Cartesian coordinate space.
-#[derive(Debug, PartialEq)]
 pub struct CartesianGridSpec {
     /// Vector of characters that represent the axis labels
     /// (e.g., ['x','y','z']).
@@ -202,12 +260,17 @@ pub struct CartesianGridSpec {
     /// The Grid instance specified by this struct.
     grid: Grid,
     /// HashMap containing the Points that correspond to the Grid
-    /// boundaries.
+    /// boundaries. Only non-periodic boundary points are included.
     /// Points that are part of more than one boundary, such
     /// as corners, are currently included and thus the behavior of 
     /// values at these points may be undefined.
     /// (e.g., { ('x', BoundaryPoints{...}), ('y', BoundaryPoints{...}) })
     boundary_pts: HashMap<char, BoundaryPoints>,
+    /// HashMap that contains booleans signifying whether each axis
+    /// is periodic.
+    periodic_axs: HashMap<char, bool>,
+    /// HashMap of GridScalars which are defined on the Grid
+    scalars: HashMap<char, GridScalar>,
 }
 
 impl GridSpec for CartesianGridSpec {
@@ -218,6 +281,7 @@ impl GridSpec for CartesianGridSpec {
     fn grid_axes(&self) -> &HashMap<char, usize> { &self.grid_axes }
     fn spacing(&self) -> &HashMap<char, f64> { &self.spacing }
     fn grid(&self) -> &Grid { &self.grid }
+    fn periodic_axs(&self) -> &HashMap<char, bool> { &self.periodic_axs }
     
     fn bound_pts(&self, axis: char, side: BoundarySide) -> &Vec<Point> {
         match side {
@@ -225,6 +289,9 @@ impl GridSpec for CartesianGridSpec {
             BoundarySide::High => &self.boundary_pts[&axis].high,
         }
     }
+
+    fn scalars(&self) -> &HashMap<char, GridScalar> { &self.scalars }
+    fn scalars_mut(&mut self) -> &mut HashMap<char, GridScalar> { &mut self.scalars }
 
     /*
     fn bound_idxs(&self, dimension: usize, side: crate::boundaries::BoundarySide) -> Vec<usize> {
@@ -258,21 +325,21 @@ impl CartesianGridSpec {
     /// assert_eq!(spec.spacing()[&'x'], 0.01);
     /// assert_eq!(spec.spacing()[&'y'], 0.01);
     /// ```
-    pub fn new(axes: HashMap<char, AxisSetup>) -> Self {
-        let axis_chars: Vec<char> = axes.iter().map(|(label, _)| *label).collect();
+    pub fn new(axes: GridSpace) -> Self {
+        let axis_chars: Vec<char> = axes.0.iter().map(|(label, _)| *label).collect();
         // grid_axes holds the axis index values that correspond to the axes of the grid object
         let grid_axes: HashMap<char, usize> = axis_chars.iter().enumerate().map(|(index, label)| (*label, index)).collect();
         // gridshape holds the number of steps for each axis
-        let gridshape: HashMap<char, usize> = axes.iter().map(|(label, axis)| (*label, axis.steps)).collect();
+        let gridshape: HashMap<char, usize> = axes.0.iter().map(|(label, axis)| (*label, axis.steps)).collect();
         // calculate the full set of coordinates for each axis based on the
         // AxisSetup specifications
-        let coords: HashMap<char, Vec<f64>> = axes.iter().map(|(label, axis)| {
+        let coords: HashMap<char, Vec<f64>> = axes.0.iter().map(|(label, axis)| {
                 let mut set = Vec::with_capacity(axis.steps);
                 for i in 0..axis.steps {set.push(axis.start + (i as f64)*axis.delta);}
                 (*label, set)
             }).collect();
         // spacing holds the delta value for each axis
-        let spacing: HashMap<char, f64> = axes.iter().map(|(label, axis)| (*label, axis.delta)).collect();
+        let spacing: HashMap<char, f64> = axes.0.iter().map(|(label, axis)| (*label, axis.delta)).collect();
         // initialize the grid with default values
         let mut grid_init_vec: Vec<usize> = vec![0; axis_chars.len()];
         let _: () = grid_axes.iter().map(|(label, axnum)| {
@@ -289,18 +356,21 @@ impl CartesianGridSpec {
             pt.idx = count;
             count += 1;
         }).collect();
+        let periodic_axs: HashMap<char, bool> = axes.0.iter().map(|(label, axis)| (*label, axis.periodic)).collect();
         let mut boundary_pts: HashMap<char, BoundaryPoints> = HashMap::new();
         // populate the boundary points
-        for ax in axis_chars.iter() {
-            let mut low_pts: Vec<Point> = Vec::new();
-            let mut high_pts: Vec<Point> = Vec::new();
-            let low_slc = grid.slice_axis(ndarray::Axis(grid_axes[ax]), ndarray::Slice::from(0..1));
-            let high_slc = grid.slice_axis(ndarray::Axis(grid_axes[ax]), ndarray::Slice::from(-1..-2));
-            // TODO: Determine a way to better handle corners and edges where
-            // boundaries meet.
-            for pt in low_slc.iter() { low_pts.push(pt.clone()); }
-            for pt in high_slc.iter() { high_pts.push(pt.clone()); }
-            boundary_pts.insert(*ax, BoundaryPoints{low: low_pts, high: high_pts});
+        for (ax, periodic) in periodic_axs.iter() {
+            if !periodic {
+                let mut low_pts: Vec<Point> = Vec::new();
+                let mut high_pts: Vec<Point> = Vec::new();
+                let low_slc = grid.slice_axis(ndarray::Axis(grid_axes[ax]), ndarray::Slice::from(0..1));
+                let high_slc = grid.slice_axis(ndarray::Axis(grid_axes[ax]), ndarray::Slice::from(-1..-2));
+                // TODO: Determine a way to better handle corners and edges where
+                // boundaries meet.
+                for pt in low_slc.iter() { low_pts.push(pt.clone()); }
+                for pt in high_slc.iter() { high_pts.push(pt.clone()); }
+                boundary_pts.insert(*ax, BoundaryPoints{low: low_pts, high: high_pts});
+            }
         }
 
         CartesianGridSpec {
@@ -308,69 +378,82 @@ impl CartesianGridSpec {
             spacing,
             gridshape,
             grid_axes,
-            ndim: axes.len(),
+            ndim: axes.0.len(),
             coords,
             grid: Grid(grid),
             boundary_pts,
+            periodic_axs,
+            scalars: HashMap::new(),
         }
     }
+
+    pub fn scalars(&self) -> &HashMap<char, GridScalar> { &self.scalars }
+
+    pub fn scalars_mut(&mut self) -> &mut HashMap<char, GridScalar> { &mut self.scalars }
 }
 
-/// The GridQty trait is meant to leave open the possibility of in the
-/// future adding something like a GridVector struct that would store
-/// a vector value for each point on the grid as opposed to the scalar
-/// values stored by the GridScalar struct. However, it is more likely
-/// that this trait may be deprecated in the future and a GridVector
-/// struct would just contain a vector of GridScalars.
-pub trait GridQty<S> where S: GridSpec {
-    /// Returns an Rc pointing to the GridSpec held by the GridQty.
-    fn spec(&self) -> Rc<S>;
-    /// Returns a shared reference to the ValVector held by the GridQty.
-    fn gridvals(&self) -> &ValVector;
-    /// Returns a mutable reference to the ValVector held by the GridQty.
-    fn gridvals_mut(&mut self) -> &mut ValVector;
-    /// Returns a shared reference to the Grid struct on which the
-    /// GridQty is defined.
-    fn grid(&self) -> &Grid;
-    /// A public API that allows the creation of a new GridQty simply
-    /// from its component parts (i.e., a GridSpec and a ValVector).
-    /// Because ValVector has a very limited public API, this method
-    /// is generally used to construct a new GridQty after performing
-    /// some operation on an existing GridQty.
-    /// (See rustencils::operator::OperatorMatrix::of)
-    /// # Arguments
-    /// * `spec` - reference counted smart pointer to a GridSpec
-    /// * `gridvals` - ValVector containing the quantity of interest
-    fn new(spec: Rc<S>, gridvals: ValVector) -> Self;
-}
+// /// The GridQty trait is meant to leave open the possibility of in the
+// /// future adding something like a GridVector struct that would store
+// /// a vector value for each point on the grid as opposed to the scalar
+// /// values stored by the GridScalar struct. However, it is more likely
+// /// that this trait may be deprecated in the future and a GridVector
+// /// struct would just contain a vector of GridScalars.
+// pub trait GridQty<S> where S: GridSpec {
+//     /// Returns an Rc pointing to the GridSpec held by the GridQty.
+//     fn spec(&self) -> Rc<S>;
+//     /// Returns a shared reference to the ValVector held by the GridQty.
+//     fn gridvals(&self) -> &ValVector;
+//     /// Returns a mutable reference to the ValVector held by the GridQty.
+//     fn gridvals_mut(&mut self) -> &mut ValVector;
+//     /// Returns a shared reference to the Grid struct on which the
+//     /// GridQty is defined.
+//     fn grid(&self) -> &Grid;
+//     /// A public API that allows the creation of a new GridQty simply
+//     /// from its component parts (i.e., a GridSpec and a ValVector).
+//     /// Because ValVector has a very limited public API, this method
+//     /// is generally used to construct a new GridQty after performing
+//     /// some operation on an existing GridQty.
+//     /// (See rustencils::operator::OperatorMatrix::of)
+//     /// # Arguments
+//     /// * `spec` - reference counted smart pointer to a GridSpec
+//     /// * `gridvals` - ValVector containing the quantity of interest
+//     fn new(spec: Rc<S>, gridvals: ValVector) -> Self;
+// }
 
 /// The GridScalar struct is the type that represents the values of
 /// interest. It contains a GridSpec and a ValVector.
-#[derive(Clone, Debug, PartialEq)]
-pub struct GridScalar<S> {
-    /// A reference counted smart pointer to a GridSpec
-    spec: Rc<S>,
+// #[derive(Clone, Debug, PartialEq)]
+pub struct GridScalar {
     /// A vector that just contains the values of interest at every point
-    gridvals: ValVector, 
+    gridvals: ValVector,
+    /// The boundary conditions that apply to the gridvals
+    bound_conds: Vec<Box<dyn BoundaryCondition>>,
 }
 
-impl<S> GridQty<S> for GridScalar<S> where S: GridSpec {
-    fn spec(&self) -> Rc<S> { Rc::clone(&self.spec) }
-    fn gridvals(&self) -> &ValVector { &self.gridvals }
-    fn gridvals_mut(&mut self) -> &mut ValVector { &mut self.gridvals }
-    fn grid(&self) -> &Grid { self.spec.grid() }
-    fn new(spec: Rc<S>, gridvals: ValVector) -> Self {
-        Self::new(spec, gridvals)
+// impl<S> GridQty<S> for GridScalar<S> where S: GridSpec {
+//     fn spec(&self) -> Rc<S> { Rc::clone(&self.spec) }
+//     fn gridvals(&self) -> &ValVector { &self.gridvals }
+//     fn gridvals_mut(&mut self) -> &mut ValVector { &mut self.gridvals }
+//     fn grid(&self) -> &Grid { self.spec.grid() }
+//     fn new(spec: Rc<S>, gridvals: ValVector) -> Self {
+//         Self::new(spec, gridvals)
+//     }
+// }
+
+impl GridScalar {
+    /// Returns a shared reference to the ValVector held by the GridQty.
+    pub fn gridvals(&self) -> &ValVector { &self.gridvals }
+    /// Returns a mutable reference to the ValVector held by the GridQty.
+    pub fn gridvals_mut(&mut self) -> &mut ValVector { &mut self.gridvals }
+
+    pub fn add_bound_condition<B: BoundaryCondition>(&mut self, condition: B) {
+        self.bound_conds.append(vec![Box::new(condition)]);
     }
-}
-
-impl<S> GridScalar<S> where S: GridSpec {
-    /// Private constructor that is used by the implementation of
-    /// GridQty::new().
-    fn new(spec: Rc<S>, gridvals: ValVector) -> Self {
+    /// Private constructor
+    pub(crate) fn new(gridvals: ValVector, bound_conds: Vec<Box<dyn BoundaryCondition>>) -> Self {
         GridScalar {
-            spec,
             gridvals,
+            bound_conds,
         }
     }
 
@@ -383,7 +466,7 @@ impl<S> GridScalar<S> where S: GridSpec {
     /// ```
     /// use std::rc::Rc;
     /// use std::collections::HashMap;
-    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+    /// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
     /// let x = AxisSetup::new(0., 0.01, 100);
     /// let y = x.clone();
     /// let mut axs = HashMap::new();
@@ -394,16 +477,19 @@ impl<S> GridScalar<S> where S: GridSpec {
     /// assert_eq!(temperature.gridvals()[0], 0.5);
     /// assert_eq!(temperature.gridvals().len(), 100*100);
     /// ```
-    pub fn uniform(spec: Rc<S>, value: f64) -> Self {
+    pub fn uniform<S: GridSpec>(spec: &mut S, label: char, value: f64) {
         let mut n = 1;
         for (_, elm) in spec.gridshape() {
             n *= elm;
         }
         let gridvals: ndarray::Array1<f64> = ndarray::arr1(&vec![value; n][..]);
-        GridScalar{
-            spec,
-            gridvals: ValVector(gridvals),
-        }
+        spec.scalars_mut().insert(
+            label,
+            GridScalar {
+                gridvals: ValVector(gridvals),
+                bound_conds: Vec::new(),
+            }
+        );
     }
 
     /// Returns a GridScalar where the value of interest at each point is
@@ -414,7 +500,7 @@ impl<S> GridScalar<S> where S: GridSpec {
     /// ```
     /// use std::rc::Rc;
     /// use std::collections::HashMap;
-    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+    /// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
     /// let x = AxisSetup::new(0., 0.01, 100);
     /// let y = x.clone();
     /// let mut axs = HashMap::new();
@@ -425,8 +511,8 @@ impl<S> GridScalar<S> where S: GridSpec {
     /// assert_eq!(temperature.gridvals()[0], 1.);
     /// assert_eq!(temperature.gridvals().len(), 100*100);
     /// ```
-    pub fn ones(spec: Rc<S>) -> Self {
-        GridScalar::uniform(spec, 1.)
+    pub fn ones<S: GridSpec>(spec: &mut S, label: char) {
+        GridScalar::uniform(spec, label, 1.);
     }
 
     /// Returns a GridScalar where the value of interest at each point is
@@ -437,7 +523,7 @@ impl<S> GridScalar<S> where S: GridSpec {
     /// ```
     /// use std::rc::Rc;
     /// use std::collections::HashMap;
-    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+    /// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
     /// let x = AxisSetup::new(0., 0.01, 100);
     /// let y = x.clone();
     /// let mut axs = HashMap::new();
@@ -448,238 +534,144 @@ impl<S> GridScalar<S> where S: GridSpec {
     /// assert_eq!(temperature.gridvals()[0], 0.);
     /// assert_eq!(temperature.gridvals().len(), 100*100);
     /// ```
-    pub fn zeros(spec: Rc<S>) -> Self {
-        GridScalar::uniform(spec, 0.)
-    }
-
-    /// Returns a GridScalar instance that contains the values along the
-    /// specified coordinate axis that correspond to the indices of the
-    /// GridScalar. Use this if you need to add/multiply/etc. the value
-    /// of interest by the axis coordinate (e.g., x*dT/dx, or y+T).
-    /// # Arguments
-    /// * `spec` - reference counted smart pointer to a GridSpec
-    /// * `dimension` - the axis for which the values are desired
-    /// # Examples
-    /// ```
-    /// use std::rc::Rc;
-    /// use std::collections::HashMap;
-    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
-    /// let x_init = AxisSetup::new(0., 0.01, 100);
-    /// let y_init = x_init.clone();
-    /// let mut axs_init = HashMap::new();
-    /// axs_init.insert('x', x_init);
-    /// axs_init.insert('y', y_init);
-    /// let spec = Rc::new(CartesianGridSpec::new(axs_init));
-    /// let temperature = GridScalar::zeros(Rc::clone(&spec));
-    /// let x_vals = GridScalar::axis_vals(Rc::clone(&spec), 'x');
-    /// let y_vals = GridScalar::axis_vals(spec, 'y');
-    /// let x_plus_temp = &x_vals + &temperature;
-    /// let temp_minus_y = &temperature - &y_vals;
-    /// assert_eq!(x_plus_temp, x_vals);
-    /// assert_eq!(temp_minus_y, -&y_vals);
-    /// ```
-    pub fn axis_vals(spec: Rc<S>, axis_label: char) -> Self {
-        let mut axis = GridScalar::zeros(Rc::clone(&spec));
-        let _ = spec.grid().iter().map(|point| {
-            axis.gridvals[point.idx] = point.coord[&axis_label];
-        }).collect::<()>();
-        axis
+    pub fn zeros<S: GridSpec>(spec: &mut S, label: char) {
+        GridScalar::uniform(spec, label, 0.);
     }
 }
 
-impl<'a, 'b, S> std::ops::Sub<&'b GridScalar<S>> for &'a GridScalar<S> where S: GridSpec {
-    type Output = GridScalar<S>;
+impl<'a, 'b> std::ops::Sub<&'b ValVector> for &'a ValVector {
+    type Output = ValVector;
 
-    fn sub(self, other: &'b GridScalar<S>) -> Self::Output {
-        if self.gridvals.len() == other.gridvals.len() &&
-        Rc::ptr_eq(&self.spec(), &other.spec()) {
-            let result = self.gridvals.vals() - other.gridvals.vals();
-            GridScalar {
-                spec: Rc::clone(&self.spec),
-                gridvals: ValVector(result),
-            }
+    fn sub(self, other: &'b ValVector) -> Self::Output {
+        if self.len() == other.len() {
+            ValVector(self.0 - other.0)
         }
-        else { panic!("Error subtracting GridScalars! Ensure sizes and GridSpecs are the same.") }
+        else { panic!("Error subtracting ValVectors! Ensure sizes are the same.") }
     }
 }
 
-impl<'a, S> std::ops::Sub<f64> for &'a GridScalar<S> {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Sub<f64> for &'a ValVector {
+    type Output = ValVector;
 
     fn sub(self, other: f64) -> Self::Output {
-        let result  = self.gridvals.vals() - other;
-        
-        GridScalar {
-            spec: Rc::clone(&self.spec),
-            gridvals: ValVector(result),
-        }
+        ValVector(self.0 - other)
     }
 }
 
-impl<'a, S> std::ops::Sub<&'a GridScalar<S>> for f64 {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Sub<&'a ValVector> for f64 {
+    type Output = ValVector;
 
-    fn sub(self, other: &'a GridScalar<S>) -> Self::Output {
-        let result = self - other.gridvals.vals();
-        
-        GridScalar {
-            spec: Rc::clone(&other.spec),
-            gridvals: ValVector(result),
-        }
+    fn sub(self, other: &'a ValVector) -> Self::Output {
+        ValVector(self - other.0)
     }
 }
 
-impl<'a, 'b, S> std::ops::Add<&'b GridScalar<S>> for &'a GridScalar<S> where S: GridSpec {
-    type Output = GridScalar<S>;
+impl<'a, 'b> std::ops::Add<&'b ValVector> for &'a ValVector {
+    type Output = ValVector;
 
-    fn add(self, other: &'b GridScalar<S>) -> Self::Output {
-        if self.gridvals.len() == other.gridvals.len() &&
-        Rc::ptr_eq(&self.spec(), &other.spec()) {
-            let result = self.gridvals.vals() + other.gridvals.vals();
-            GridScalar {
-                spec: Rc::clone(&self.spec),
-                gridvals: ValVector(result),
-            }
+    fn add(self, other: &'b ValVector) -> Self::Output {
+        if self.len() == other.len() {
+            ValVector(self.0 + other.0)
         }
-        else { panic!("Error adding GridScalars! Ensure sizes and GridSpecs are the same.") }
+        else { panic!("Error adding ValVectors! Ensure sizes are the same.") }
     }
 }
 
-impl<'a, S> std::ops::Add<f64> for &'a GridScalar<S> {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Add<f64> for &'a ValVector {
+    type Output = ValVector;
 
     fn add(self, other: f64) -> Self::Output {
-        let result  = self.gridvals.vals() + other;
-        
-        GridScalar {
-            spec: Rc::clone(&self.spec),
-            gridvals: ValVector(result),
-        }
+        ValVector(self.0 + other)
     }
 }
 
-impl<'a, S> std::ops::Add<&'a GridScalar<S>> for f64 {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Add<&'a ValVector> for f64 {
+    type Output = ValVector;
 
-    fn add(self, other: &'a GridScalar<S>) -> Self::Output {
-        let result = self + other.gridvals.vals();
-        
-        GridScalar {
-            spec: Rc::clone(&other.spec),
-            gridvals: ValVector(result),
-        }
+    fn add(self, other: &'a ValVector) -> Self::Output {
+        ValVector(self + other.0)
     }
 }
 
-impl<'a, 'b, S> std::ops::Mul<&'b GridScalar<S>> for &'a GridScalar<S> where S: GridSpec {
-    type Output = GridScalar<S>;
+impl<'a, 'b> std::ops::Mul<&'b ValVector> for &'a ValVector {
+    type Output = ValVector;
 
-    fn mul(self, other: &'b GridScalar<S>) -> Self::Output {
-        if self.gridvals.len() == other.gridvals.len() &&
-        Rc::ptr_eq(&self.spec(), &other.spec()) {
-            let result = self.gridvals.vals() * other.gridvals.vals();
-            GridScalar {
-                spec: Rc::clone(&self.spec),
-                gridvals: ValVector(result),
-            }
+    fn mul(self, other: &'b ValVector) -> Self::Output {
+        if self.len() == other.len() {
+            ValVector(self.0 * other.0)
         }
-        else { panic!("Error multiplying GridScalars! Ensure sizes and GridSpecs are the same.") }
+        else { panic!("Error multiplying ValVectors! Ensure sizes are the same.") }
     }
 }
 
-impl<'a, S> std::ops::Mul<f64> for &'a GridScalar<S> {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Mul<f64> for &'a ValVector {
+    type Output = ValVector;
 
     fn mul(self, other: f64) -> Self::Output {
-        let result = self.gridvals.vals() * other;
-        
-        GridScalar {
-            spec: Rc::clone(&self.spec),
-            gridvals: ValVector(result),
-        }
+        ValVector(self.0 * other)
     }
 }
 
-impl<'a, S> std::ops::Mul<&'a GridScalar<S>> for f64 {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Mul<&'a ValVector> for f64 {
+    type Output = ValVector;
 
-    fn mul(self, other: &'a GridScalar<S>) -> Self::Output {
-        let result = self * other.gridvals.vals();
-        
-        GridScalar {
-            spec: Rc::clone(&other.spec),
-            gridvals: ValVector(result),
-        }
+    fn mul(self, other: &'a ValVector) -> Self::Output {
+        ValVector(self * other.0)
     }
 }
 
-impl<'a, 'b, S> std::ops::Div<&'b GridScalar<S>> for &'a GridScalar<S> where S: GridSpec {
-    type Output = GridScalar<S>;
+impl<'a, 'b> std::ops::Div<&'b ValVector> for &'a ValVector {
+    type Output = ValVector;
 
-    fn div(self, other: &'b GridScalar<S>) -> Self::Output {
-        if self.gridvals.len() == other.gridvals.len() &&
-        Rc::ptr_eq(&self.spec(), &other.spec()) {
-            let result = self.gridvals.vals() / other.gridvals.vals();
-            GridScalar {
-                spec: Rc::clone(&self.spec),
-                gridvals: ValVector(result),
-            }
+    fn div(self, other: &'b ValVector) -> Self::Output {
+        if self.len() == other.len() {
+            ValVector(self.0 / other.0)
         }
-        else { panic!("Error dividing GridScalars! Ensure sizes and GridSpecs are the same.") }
+        else { panic!("Error dividing ValVectors! Ensure sizes are the same.") }
     }
 }
 
-impl<'a, S> std::ops::Div<f64> for &'a GridScalar<S> {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Div<f64> for &'a ValVector {
+    type Output = ValVector;
 
     fn div(self, other: f64) -> Self::Output {
-        let result = self.gridvals.vals() / other;
-        
-        GridScalar {
-            spec: Rc::clone(&self.spec),
-            gridvals: ValVector(result),
-        }
+        ValVector(self.0 / other)
     }
 }
 
-impl<'a, S> std::ops::Div<&'a GridScalar<S>> for f64 {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Div<&'a ValVector> for f64 {
+    type Output = ValVector;
 
-    fn div(self, other: &'a GridScalar<S>) -> Self::Output {
-        let result = self / other.gridvals.vals();
-        
-        GridScalar {
-            spec: Rc::clone(&other.spec),
-            gridvals: ValVector(result),
-        }
+    fn div(self, other: &'a ValVector) -> Self::Output {
+        ValVector(self / other.0)
     }
 }
 
-impl<'a, S> std::ops::Neg for &'a GridScalar<S> {
-    type Output = GridScalar<S>;
+impl<'a> std::ops::Neg for &'a ValVector {
+    type Output = ValVector;
 
     fn neg(self) -> Self::Output {
-        GridScalar{
-            spec: Rc::clone(&self.spec),
-            gridvals: ValVector(-self.gridvals.vals()),
-        }
+        ValVector(-self.0)
     }
 }
 
 /// The BoundaryHandler struct simply holds a vector of BoundaryConditions
 /// and is responsible for setting the boundary points to the appropriate
 /// values.
-pub struct BoundaryHandler {
+struct BoundaryHandler {
     conditions: Vec<Box<dyn BoundaryCondition>>,
 }
 
 impl BoundaryHandler {
-    /// Constructs a new BoundaryHandler instance
+    /// Constructs a new BoundaryHandler instance. The caller is responsible
+    /// for ensuring that there is only one condition per combination of
+    /// axis and side. Currently, repeats are ignored in
+    /// BoundaryHandler::set_bound_vals().
     /// # Arguments
     /// * `conditions` - Vector of BoundaryConditions for the current system
-    pub fn new(conditions: Vec<Box<dyn BoundaryCondition>>) -> Self {
+    fn new() -> Self {
         BoundaryHandler {
-            conditions
+            conditions: Vec::new(),
         }
     }
 
@@ -692,7 +684,7 @@ impl BoundaryHandler {
     /// ```
     /// use std::rc::Rc;
     /// use std::collections::HashMap;
-    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+    /// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
     /// use rustencils::grid::{BoundarySide, BoundaryHandler, BoundaryCondition, DirichletConstant};
     /// let x_init = AxisSetup::new(0., 0.01, 100);
     /// let y_init = x_init.clone();
@@ -706,17 +698,19 @@ impl BoundaryHandler {
     /// bcs.set_bound_vals(0., &mut temperature);
     /// ```
     /// TODO: Improve testing of this method.
-    pub fn set_bound_vals<Q: GridQty<S>, S: GridSpec>(&mut self, time: f64, qty: &mut Q) {
+    /// Note: Must update constructor if handling of repeats changes!
+    fn set_bound_vals(&mut self, time: f64, qty: &mut GridScalar) {
         let mut settable: Vec<(usize, f64)> = Vec::new();
         for cndtn in self.conditions.iter_mut() {
             settable.append(&mut cndtn.generate_vals(time));
         }
+        let gridvals = qty.gridvals_mut();
         let mut used_indices: Vec<usize> = Vec::new();
         for (idx, val) in settable.iter() {
             if used_indices.contains(idx) {
                 continue
             }
-            qty.gridvals_mut()[*idx] = *val;
+            gridvals[*idx] = *val;
             used_indices.push(*idx);
         }
     } // maybe call this set_BCs?
@@ -761,12 +755,13 @@ impl DirichletConstant {
 
 /// The DirichletFunction is a boundary condition that may depend on space and time
 /// through a function pointer held by the object.
-pub struct DirichletFunction {
-    fnctn: Box<dyn Fn(f64, &Point) -> f64>,
+pub struct DirichletFunction<F> {
+    // fnctn: Box<dyn Fn(f64, &Point) -> f64>,
+    fnctn: F,
     pts: Vec<Point>,
 }
 
-impl BoundaryCondition for DirichletFunction {
+impl<F: Fn(f64, &Point)->f64> BoundaryCondition for DirichletFunction<F> {
     fn generate_vals(&mut self, time: f64) -> Vec<(usize, f64)> {
         let mut output = Vec::new();
         for pt in self.pts.iter() {
@@ -777,7 +772,7 @@ impl BoundaryCondition for DirichletFunction {
     }
 }
 
-impl DirichletFunction {
+impl<F: Fn(f64, &Point)->f64> DirichletFunction<F> {
     /// Returns a new DirichletFunction instance based on the given function,
     /// GridSpec, axis, and side arguments.
     /// # Arguments
@@ -786,7 +781,7 @@ impl DirichletFunction {
     /// * `axis` - The character that labels which axis will have its boundary set
     /// * `side` - The side of the given axis to be set with the given function
     pub fn new<S>(
-        fnctn: Box<dyn Fn(f64, &Point) -> f64>, 
+        fnctn: F, // Box<dyn Fn(f64, &Point) -> f64>, 
         spec: &S, 
         axis: char, 
         side: BoundarySide

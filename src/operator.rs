@@ -2,9 +2,6 @@ extern crate ndarray;
 
 /// The full 1D operator construction with finite difference weights
 /// corresponding to the interior region, as well as those for the edges.
-/// The basis direction refers to the dimension along which the
-/// operator should be applied (e.g., [0][1][2] corresponding to
-/// [x][y][z] in Cartesian coordinates
 #[derive(Debug)]
 pub struct Operator1D<E> {
     /// An instance of rustencils::stencil::FdWeights holding the finite
@@ -13,10 +10,7 @@ pub struct Operator1D<E> {
     /// A set of rustencils::stencil::FdWeights instances holding the
     /// finite difference coefficients used at the edges of the grid
     /// where the interior stencil will not fit
-    edge: E,
-    /// Axis with respect to which the derivative will be taken. Must
-    /// match the character used to construct the axis.
-    basis_direction: char,
+    edge: Option<E>,
     /// The order of the derivative
     deriv_ord: usize,
 }
@@ -38,7 +32,7 @@ impl<E> Operator1D<E> where E: EdgeOperator {
     /// use std::rc::Rc;
     /// use std::collections::HashMap;
     /// use rustencils::stencil::FdWeights;
-    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+    /// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
     /// use rustencils::operator::{Operator1D, FixedEdgeOperator};
     /// 
     /// // First initialize the grid objects
@@ -91,19 +85,21 @@ impl<E> Operator1D<E> where E: EdgeOperator {
     /// let op1d_2nd_x = Operator1D::new(wts_2nd_int.clone(), edge_wts_2nd.clone(), 'x');
     /// let op1d_2nd_y = Operator1D::new(wts_2nd_int, edge_wts_2nd, 'y');
     /// ```
-    pub fn new(interior: crate::stencil::FdWeights, edge: E, axis: char) -> Self {
+    pub fn new(interior: crate::stencil::FdWeights, edge: Option<E>) -> Self {
         let deriv_ord = interior.ord();
-        for elm in edge.left() {
-            assert_eq!(deriv_ord, elm.ord());
+        if let Some(edge) = &edge {
+            for elm in edge.left() {
+                assert_eq!(deriv_ord, elm.ord());
+            }
+            for elm in edge.right() {
+                assert_eq!(deriv_ord, elm.ord());
+            }
+            let _ = edge.check_edges(&interior);
         }
-        for elm in edge.right() {
-            assert_eq!(deriv_ord, elm.ord());
-        }
-        let _ = edge.check_edges(&interior);
+
         Operator1D {
             interior,
             edge,
-            basis_direction: axis,
             deriv_ord,
         }
     }
@@ -267,7 +263,7 @@ impl OperatorMatrix {
     /// use std::rc::Rc;
     /// use std::collections::HashMap;
     /// use rustencils::stencil::FdWeights;
-    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+    /// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
     /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
     /// use rustencils::operator::construct_op;
     /// 
@@ -305,18 +301,18 @@ impl OperatorMatrix {
     /// let d2dy2 = construct_op(op1d_2nd_y, &T);
     /// 
     /// // Differentiate T
-    /// let d2Tdx2 = d2dx2.of_qty(&T);
-    /// let d2Tdy2 = d2dy2.of_qty(&T);
+    /// let d2Tdx2 = d2dx2.of_scalar(&T);
+    /// let d2Tdy2 = d2dy2.of_scalar(&T);
     /// 
     /// // Can also construct more complex operator!
     /// let Del2 = &d2dx2 + &d2dy2;
-    /// let Del2T = Del2.of_qty(&T);
+    /// let Del2T = Del2.of_scalar(&T);
     /// ```
-    pub fn of_qty<Q, S>(&self, qty: &Q) -> Q
-    where Q: GridQty<S>, S: GridSpec {
+    pub fn of_scalar<S>(&self, qty: &GridScalar<S>) -> GridScalar<S>
+    where S: GridSpec {
         assert_eq!(qty.gridvals().len(), self.shape.0);
         let result = self.matrix.dot(qty.gridvals().as_ndarray());
-        GridQty::new(qty.spec(), crate::grid::ValVector(result))
+        GridScalar::new(qty.spec(), crate::grid::ValVector(result))
     }
 
     /// Returns a new OperatorMatrix that is the result of taking the
@@ -329,7 +325,7 @@ impl OperatorMatrix {
     /// use std::rc::Rc;
     /// use std::collections::HashMap;
     /// use rustencils::stencil::FdWeights;
-    /// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+    /// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
     /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
     /// use rustencils::operator::construct_op;
     /// 
@@ -367,12 +363,12 @@ impl OperatorMatrix {
     /// let d2dy2 = construct_op(op1d_2nd_y, &T);
     /// 
     /// // Differentiate T
-    /// let d2Tdy2 = d2dy2.of_qty(&T);
-    /// let d4Tdx2dy2 = d2dx2.of_qty(&d2Tdy2);
+    /// let d2Tdy2 = d2dy2.of_scalar(&T);
+    /// let d4Tdx2dy2 = d2dx2.of_scalar(&d2Tdy2);
     /// 
     /// // Can also construct more complex operator!
     /// let d4dx2dy2 = d2dx2.of_mtx(&d2dy2);
-    /// let d4Tdx2dy2 = d4dx2dy2.of_qty(&T);
+    /// let d4Tdx2dy2 = d4dx2dy2.of_scalar(&T);
     /// ```
     pub fn of_mtx(&self, other: &OperatorMatrix) -> Self {
         if self.shape == other.shape {
@@ -386,7 +382,7 @@ impl OperatorMatrix {
     }
 }
 
-use crate::grid::{GridQty, GridSpec};
+use crate::grid::{GridSpec, GridScalar};
 
 /// Constructs a new OperatorMatrix based on an Operator1D and a GridQty
 /// # Arguments
@@ -397,7 +393,7 @@ use crate::grid::{GridQty, GridSpec};
 /// use std::rc::Rc;
 /// use std::collections::HashMap;
 /// use rustencils::stencil::FdWeights;
-/// use rustencils::grid::{GridScalar, GridQty, CartesianGridSpec, AxisSetup};
+/// use rustencils::grid::{GridScalar, CartesianGridSpec, AxisSetup};
 /// use rustencils::operator::{Operator1D, FixedEdgeOperator, OperatorMatrix};
 /// use rustencils::operator::construct_op;
 /// 
@@ -434,43 +430,75 @@ use crate::grid::{GridQty, GridSpec};
 /// let d2dx2 = construct_op(op1d_2nd_x, &T);
 /// let d2dy2 = construct_op(op1d_2nd_y, &T);
 /// ```
-pub fn construct_op<Q, S, E>(op1d: Operator1D<E>, qty: &Q) -> OperatorMatrix
-where Q: GridQty<S>, S: GridSpec, E: EdgeOperator
+pub fn construct_op<S, E>(axis: char, op1d: Operator1D<E>, qty: &GridScalar<S>) -> OperatorMatrix
+where S: GridSpec, E: EdgeOperator
 {
-    let dim = op1d.basis_direction;
-    let dim_pts = qty.spec().gridshape()[&dim];
+    let dim_pts = qty.spec().gridshape()[&axis];
     let tot_pts = qty.gridvals().len();
     let shape = (tot_pts, tot_pts);
     let deriv_ord = op1d.ord();
-    let denom = (qty.spec().spacing()[&dim]).powi(deriv_ord as i32);
+    let denom = (qty.spec().spacing()[&axis]).powi(deriv_ord as i32);
     let mut matrix: ndarray::Array2<f64> = ndarray::Array2::zeros(shape);
-    for (idxs, pt) in qty.grid().indexed_iter() {
-        let left_idx = idxs[qty.spec().grid_axes()[&dim]];
-        let right_idx = dim_pts - idxs[qty.spec().grid_axes()[&dim]] - 1;
-        
-        let (stncl, weights) = match (left_idx, right_idx) {
-            (left_idx, right_idx) if left_idx >= op1d.edge.left().len() && right_idx >= op1d.edge.right().len()
-                        => (op1d.interior.slots(), op1d.interior.weights()),
-            (left_idx, _) if left_idx < op1d.edge.left().len()
-                        => (op1d.edge.left()[left_idx].slots(), op1d.edge.left()[left_idx].weights()),
-            (_, right_idx) if right_idx < op1d.edge.right().len()
-                        => (op1d.edge.right()[right_idx].slots(), op1d.edge.right()[right_idx].weights()),
-            (_, _) => panic!("Error while constructing operator!"),
-        };
+    if let Some(edge) = op1d.edge {
+        for (idxs, pt) in qty.grid().indexed_iter() {
+            let left_idx = idxs[qty.spec().grid_axes()[&axis]];
+            let right_idx = dim_pts - idxs[qty.spec().grid_axes()[&axis]] - 1;
 
+            let (stncl, weights) = match (left_idx, right_idx) {
+                (left_idx, right_idx) if left_idx >= edge.left().len() && right_idx >= edge.right().len()
+                            => (op1d.interior.slots(), op1d.interior.weights()),
+                (left_idx, _) if left_idx < edge.left().len()
+                            => (edge.left()[left_idx].slots(), edge.left()[left_idx].weights()),
+                (_, right_idx) if right_idx < edge.right().len()
+                            => (edge.right()[right_idx].slots(), edge.right()[right_idx].weights()),
+                (_, _) => panic!("Error constructing operator!"),
+            };
+
+            let _ = stncl.iter().enumerate().map(|(i, rel_pos)| {
+                // for periodic edges, just need to handle indexing differently
+                let mut new_idxs = idxs.clone();
+                new_idxs[qty.spec().grid_axes()[&axis]] = (new_idxs[qty.spec().grid_axes()[&axis]] as isize + rel_pos) as usize;
+                let mtx_col_idx = qty.grid()[new_idxs].idx;
+                matrix[[pt.idx, mtx_col_idx]] = weights[i]/denom;
+            }).collect::<()>();
+        }
+    
+        return OperatorMatrix {
+            shape,
+            matrix,
+        }
+    }
+
+    let stncl = op1d.interior.slots();
+    let weights = op1d.interior.weights();
+
+    for (idxs, pt) in qty.grid().indexed_iter() {
         let _ = stncl.iter().enumerate().map(|(i, rel_pos)| {
             let mut new_idxs = idxs.clone();
-            new_idxs[qty.spec().grid_axes()[&dim]] = (new_idxs[qty.spec().grid_axes()[&dim]] as isize + rel_pos) as usize;
+            let z = new_idxs[qty.spec().grid_axes()[&axis]] as isize + rel_pos;
+            new_idxs[qty.spec().grid_axes()[&axis]] = match z {
+                z if z >= 0 && z < (dim_pts as isize) => z as usize,
+                z if z < 0 => (dim_pts as isize + z) as usize,
+                z if z >= (dim_pts as isize) => (z - dim_pts as isize) as usize,
+                _ => panic!("Error constructing periodic operator!"),
+            };
             let mtx_col_idx = qty.grid()[new_idxs].idx;
             matrix[[pt.idx, mtx_col_idx]] = weights[i]/denom;
         }).collect::<()>();
     }
-    
+
     OperatorMatrix {
         shape,
         matrix,
     }
 }
+
+pub enum EdgeType {
+    Fixed,
+    Periodic,
+}
+
+pub fn default_2nd_deriv<S: GridSpec>(qty: &GridScalar<S>, edge_type: EdgeType) {}
 
 impl<'a, 'b> std::ops::Add<&'b OperatorMatrix> for &'a OperatorMatrix {
     type Output = OperatorMatrix;
